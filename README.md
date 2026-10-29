@@ -22,7 +22,7 @@
 5. Vercel 关联 GitHub 仓库，选 Vite，构建 `npm run build`，输出 `dist`，Node 22。`vercel.json` 将 `/api/*` 路由到 Node Function，不需要启动常驻后端。
 6. 在 Preview 验证登录、创建账户、收入/支出、刷新后持久化、退出与未授权访问；验证数据库备份与恢复后再切换正式域名。
 
-Vercel 项目链接不等于已部署成功，Supabase MCP 授权也不等于应用已配置 `DATABASE_URL`。本轮没有在云端执行建表或部署生产。
+Vercel 项目链接不等于已部署成功，Supabase MCP 授权也不等于应用已配置 `DATABASE_URL`。2026-10-29 已在指定 Supabase 项目执行初始化：五张表、七个分类，全部表 RLS 已核验开启。不要再次执行初始化脚本。尚未部署生产。
 
 ## 本机运行与测试
 
