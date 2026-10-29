@@ -1,8 +1,8 @@
 import type { Pool } from 'pg';
 import { createHmac } from 'node:crypto';
-import { authenticated, authConfig, issueSession, sessionCookie, verifyPassword, type AuthConfig } from './auth';
-import { database } from './db';
-import { ledger, LedgerError } from './ledger';
+import { authenticated, authConfig, issueSession, sessionCookie, verifyPassword, type AuthConfig } from './auth.js';
+import { database } from './db.js';
+import { ledger, LedgerError } from './ledger.js';
 
 function result(value: unknown, status = 200, headers: Record<string, string> = {}) {
   return Response.json(status < 400 ? { success: true, result: value } : { success: false, errorMessage: value }, {

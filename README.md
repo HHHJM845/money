@@ -17,7 +17,7 @@
 
 1. 在 Supabase 创建独立 PostgreSQL 项目，检查现有表后，在 SQL Editor 对空数据库执行 `doc/sql/init.sql`。已有安装按 `doc/sql/increment.sql` 的未执行步骤升级；两者不要重复运行。部署方记录已执行步骤。SQL 不创建外键，所有账本表启用 RLS 且不提供匿名访问策略。
 2. 从 Supabase Connect 取得 Transaction pooler 的 PostgreSQL 连接字符串。密码中的特殊字符需 URL 编码；使用平台要求的 TLS 参数，不能禁用证书校验。不要把连接字符串贴到聊天或提交 GitHub。
-3. 在 Vercel 服务端环境变量中设置 `DATABASE_URL`、`OWNER_USERNAME`、`OWNER_PASSWORD_HASH`、`SESSION_SECRET`。变量名称见 `.env.example`，不可使用 `VITE_` 前缀。Preview 使用独立测试数据库，不能共用生产数据。
+3. 在 Vercel 服务端环境变量中设置 `DATABASE_URL`、`OWNER_USERNAME`、`OWNER_PASSWORD_HASH`、`SESSION_SECRET`。Supabase 还需将 Database Settings → SSL configuration 下载的官方根证书 PEM 全文设置为 `DATABASE_CA_CERT`，保持证书和主机名校验。变量名称见 `.env.example`，不可使用 `VITE_` 前缀。Preview 使用独立测试数据库，不能共用生产数据。
 4. 所有者密码至少 12 个字符；通过 `npm run password:hash --silent` 从标准输入生成 scrypt 哈希。不要把明文密码放入命令参数或 shell 历史；交互输入时注意终端回显。`SESSION_SECRET` 使用密码管理器生成至少 32 字符的随机值。
 5. Vercel 关联 GitHub 仓库，选 Vite，构建 `npm run build`，输出 `dist`，Node 22。`vercel.json` 将 `/api/*` 路由到 Node Function，不需要启动常驻后端。
 6. 在 Preview 验证登录、创建账户、收入/支出、刷新后持久化、退出与未授权访问；验证数据库备份与恢复后再切换正式域名。

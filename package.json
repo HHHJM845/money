@@ -6,7 +6,8 @@
   "overrides": { "@vercel/cli-config": { "zod": "^4.6.6" } },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && npm run check:server && vite build",
+    "check:server": "tsc api/handler.ts --module NodeNext --moduleResolution NodeNext --target ES2022 --noEmit --skipLibCheck",
     "test": "tsx --test src/*.test.ts server/*.test.ts",
     "password:hash": "tsx scripts/hash-password.ts"
   },
