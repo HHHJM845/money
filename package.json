@@ -1,0 +1,31 @@
+{
+  "name": "money-overview",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "overrides": { "@vercel/cli-config": { "zod": "^4.6.6" } },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "tsx --test src/*.test.ts server/*.test.ts",
+    "password:hash": "tsx scripts/hash-password.ts"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.10.4",
+    "lucide-react": "^0.468.0",
+    "pg": "^8.23.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.13",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "^4.19.0",
+    "typescript": "~5.7.2",
+    "vite": "^6.4.1"
+  }
+}
