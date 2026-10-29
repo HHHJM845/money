@@ -1,7 +1,7 @@
 import type { Account, Category, Transaction } from './finance';
 
 export class ApiError extends Error {
-  constructor(message: string, public unauthorized = false) {
+  constructor(message: string, public unauthorized = false, public status?: number) {
     super(message);
   }
 }
@@ -29,7 +29,7 @@ export async function request<T>(path: string, _token = '', body?: unknown): Pro
     throw new ApiError('账本服务返回异常，请稍后重试');
   }
   if (!response.ok || !data.success) {
-    throw new ApiError(data.error?.message || data.errorMessage || `请求未完成（${response.status}）`, response.status === 401);
+    throw new ApiError(data.error?.message || data.errorMessage || `请求未完成（${response.status}）`, response.status === 401, response.status);
   }
   return data.result;
 }

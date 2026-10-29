@@ -372,3 +372,66 @@ summary { cursor: pointer; color: var(--green); font-size: 12px; }
   .period-bar > .fine { font-size: 8px; }
 }
 @media (prefers-reduced-motion: reduce) { .spinning { animation: none; } }
+
+dialog.import-dialog { width: 740px; max-width: calc(100vw - 28px); }
+.import-dialog fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.import-dialog select, .import-dialog input[type="file"] { min-width: 0; max-width: 100%; }
+.import-filename { overflow-wrap: anywhere; }
+.import-summary { display: grid; gap: 4px; padding: 18px 0; border-block: 1px solid var(--line); }
+.import-summary small { color: var(--muted); }
+.import-empty { margin-top: 24px; }
+.import-warning { border-left: 3px solid #b9862e; padding-left: 12px; color: #715323; }
+.import-issues, .import-preview { margin-block: 18px; }
+.import-dialog summary { cursor: pointer; font-weight: 600; }
+.import-issues ul { max-height: 160px; overflow: auto; padding-left: 23px; overflow-wrap: anywhere; }
+.import-table-wrap { overflow: auto; max-height: 300px; margin-top: 10px; border-block: 1px solid var(--line); }
+.import-dialog table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; line-height: 1.6; }
+.import-dialog th, .import-dialog td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.import-dialog th:first-child { width: 105px; }
+.import-dialog th:last-child { width: 110px; }
+.import-dialog th:last-child, .import-dialog td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.import-dialog th { position: sticky; top: 0; background: #fff; }
+.import-dialog label.import-confirm { display: flex; align-items: flex-start; gap: 9px; line-height: 1.7; }
+.import-confirm input[type="checkbox"] { width: 17px; height: 17px; margin: 3px 0 0; flex-shrink: 0; }
+.import-result { text-align: center; padding-block: 18px; }
+.import-result > svg { color: var(--green); }
+@media (max-width: 600px) {
+  .import-dialog .form-grid { grid-template-columns: 1fr; gap: 0; }
+  .import-dialog th:first-child { width: 85px; }
+  .import-dialog th:last-child { width: 90px; }
+  .import-dialog td, .import-dialog th { padding-inline: 4px; font-size: 11px; }
+  .import-dialog .dialog-content { padding: 16px; }
+}
+
+.workspace { max-width: 1120px; padding-bottom: 24px; }
+.page-heading { margin-bottom: 22px; }
+.book-statistics { padding-top: 28px; }
+.book-statistics > .fine { margin-bottom: 16px; }
+.daily-ledger { margin-top: 22px; }
+.ledger-day { margin-bottom: 24px; }
+.ledger-day-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; background: #f0f3ee; border-radius: 4px; }
+.ledger-day-heading h2 { font-size: 13px; }
+.ledger-day-heading .fine { font-size: 11px; }
+.day-divider { margin-inline: 6px; color: var(--line); }
+.daily-ledger .transaction-row time { display: none; }
+.empty-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.transaction-description strong { font-size: 14px; }
+.transaction-description small { font-size: 11px; }
+.row-amount { font-size: 15px; }
+.transfer-hint { margin-top: 14px; }
+@media (max-width: 720px) {
+  .mobile-nav { grid-template-columns: repeat(3, 1fr); }
+  .import-button { font-size: 12px; gap: 5px; }
+  .page-heading { gap: 8px; }
+  .page-heading h1 { font-size: 23px; }
+  .heading-actions { gap: 6px; }
+  .heading-actions .primary, .heading-actions .secondary { padding: 9px; }
+  .transaction-description strong { font-size: 13px; }
+  .transaction-description small { font-size: 11px; }
+  .row-amount { font-size: 14px; }
+  .ledger-day-heading { padding: 10px 8px; }
+  .ledger-day-heading .fine { font-size: 10px; }
+  .cashflow-summary strong { font-size: 21px; }
+  .workspace { padding-bottom: 95px; }
+  .toast { max-width: calc(100vw - 28px); white-space: normal; }
+}

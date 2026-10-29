@@ -58,6 +58,95 @@ async function write(pool: Pool, key: string, route: string, payload: Data, acti
   } finally { client.release(); }
 }
 
+function digest(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+async function importTransactions(pool: Pool, data: Data, sessionId: string) {
+  if (!['wechat', 'alipay', 'cmb', 'generic'].includes(String(data.provider))) throw new LedgerError('账单来源无效');
+  const provider = text(data.provider);
+  const accountId = id(data.accountId);
+  const incomeCategoryId = id(data.incomeCategoryId);
+  const expenseCategoryId = id(data.expenseCategoryId);
+  const balanceMode = data.balanceMode ?? 'preserve';
+  if (balanceMode !== 'preserve' && balanceMode !== 'apply') throw new LedgerError('余额处理方式无效');
+  const anonymousMode = data.anonymousMode === undefined ? 'deduplicate' : data.anonymousMode;
+  if (anonymousMode !== 'deduplicate' && anonymousMode !== 'keep') throw new LedgerError('无交易单号记录处理方式无效');
+  if (!Array.isArray(data.rows) || data.rows.length < 1 || data.rows.length > 1000) throw new LedgerError('每次需导入 1 至 1000 条流水');
+  const occurrences = new Map<string, number>();
+  const canonicalAliases = new Map<string, string>();
+  const rows = data.rows.map(value => {
+    const row = object(value);
+    const normalized = {
+      time: integer(row.time, 0, 253402271999), type: integer(row.type, 2, 3),
+      amount: integer(row.amount, 1), comment: row.comment === '' ? '' : text(row.comment, 2000),
+    };
+    const rowNumber = integer(row.rowNumber, 1);
+    const sourceId = row.sourceId === undefined ? undefined : text(row.sourceId, 256);
+    const hash = digest(normalized);
+    const occurrence = (occurrences.get(hash) ?? 0) + 1;
+    // Explicit keep mode distinguishes intentional new anonymous rows by batch; retries retain identity.
+    if (sourceId === undefined) occurrences.set(hash, occurrence);
+    const identity = sourceId !== undefined ? ['source', sourceId]
+      : anonymousMode === 'keep' ? ['fingerprint-batch', sessionId, hash, occurrence] : ['fingerprint', hash, occurrence];
+    const key = `import:row:${digest([provider, accountId, identity])}`;
+    if (sourceId === undefined && anonymousMode === 'keep') {
+      canonicalAliases.set(key, `import:row:${digest([provider, accountId, ['fingerprint', hash, occurrence]])}`);
+    }
+    return {...normalized, rowNumber, anonymous: sourceId === undefined, key, hash};
+  });
+  const unique = new Map<string, typeof rows[number]>();
+  for (const row of rows) {
+    const previous = unique.get(row.key);
+    if (previous && previous.hash !== row.hash) throw new LedgerError(`第 ${row.rowNumber} 行交易编号与其他记录内容冲突`, 409);
+    unique.set(row.key, row);
+  }
+  const payload = {provider, accountId, incomeCategoryId, expenseCategoryId, balanceMode, anonymousMode, rows};
+  return write(pool, `import:batch:${digest(sessionId)}`, 'v1/transactions/import', payload, async client => {
+    const categories = await client.query<{id: string; type: number}>('SELECT id::text,type FROM money_categories WHERE id=ANY($1::bigint[])', [[incomeCategoryId, expenseCategoryId]]);
+    if (!categories.rows.some(row => row.id === incomeCategoryId && row.type === 1)
+      || !categories.rows.some(row => row.id === expenseCategoryId && row.type === 2)) throw new LedgerError('收入或支出分类不存在或类型不匹配');
+    // All import identities include accountId. Locking that account first serializes overlapping
+    // batches and follows normal transaction account locking; batch keys have a separate namespace.
+    const account = await client.query('SELECT currency FROM money_accounts WHERE id=$1 FOR UPDATE', [accountId]);
+    if (account.rows[0]?.currency !== 'CNY') throw new LedgerError('账户不存在或币种不支持');
+    const existing = await client.query<{key: string; payload_hash: string}>('SELECT key,payload_hash FROM money_requests WHERE key=ANY($1::text[])', [[...unique.keys()]]);
+    const stored = new Map(existing.rows.map(row => [row.key, row.payload_hash]));
+    const pending = [...unique.values()].filter(row => {
+      const hash = stored.get(row.key);
+      if (hash !== undefined && hash !== row.hash) throw new LedgerError(`第 ${row.rowNumber} 行交易编号已存在但内容不同，请核对账单`, 409);
+      return hash === undefined;
+    });
+    if (pending.length) {
+      // Bulk writes keep the 1000-row request bounded even with a remote database.
+      await client.query(`INSERT INTO money_transactions(type,time,category_id,source_account_id,source_amount,comment)
+        SELECT r.type,r.time,CASE WHEN r.type=2 THEN $2::bigint ELSE $3::bigint END,$4::bigint,r.amount,r.comment
+        FROM jsonb_to_recordset($1::jsonb) AS r(type smallint,time bigint,amount bigint,comment text)`,
+      [JSON.stringify(pending), incomeCategoryId, expenseCategoryId, accountId]);
+      await client.query(`INSERT INTO money_requests(key,payload_hash,response)
+        SELECT r.key,r.hash,'{"imported":true}'::jsonb
+        FROM jsonb_to_recordset($1::jsonb) AS r(key text,hash text) ORDER BY r.key`, [JSON.stringify(pending)]);
+      // Keep rows also satisfy future default reuploads. Aliases never create transactions
+      // or contribute to balances; existing canonical occurrences remain unchanged.
+      const aliases = pending.flatMap(row => {
+        const key = canonicalAliases.get(row.key);
+        return key ? [{key, hash: row.hash}] : [];
+      });
+      if (aliases.length) await client.query(`INSERT INTO money_requests(key,payload_hash,response)
+        SELECT r.key,r.hash,'{"imported":true}'::jsonb
+        FROM jsonb_to_recordset($1::jsonb) AS r(key text,hash text) ORDER BY r.key
+        ON CONFLICT (key) DO NOTHING`, [JSON.stringify(aliases)]);
+      if (balanceMode === 'apply') {
+        const delta = pending.reduce((sum, row) => sum + BigInt(row.amount) * (row.type === 2 ? 1n : -1n), 0n);
+        await client.query('UPDATE money_accounts SET balance=balance+$2::bigint WHERE id=$1', [accountId, String(delta)]);
+      }
+    }
+    return {imported: pending.length, duplicates: rows.length - pending.length,
+      anonymousDuplicates: rows.filter(row => row.anonymous && stored.has(row.key)).length,
+      latestTime: Math.max(...rows.map(row => row.time))};
+  });
+}
+
 export async function ledger(pool: Pool, route: string, body: unknown, query: URLSearchParams): Promise<unknown> {
   if (route === 'v1/accounts/list') return (await pool.query(`SELECT ${accountColumns} FROM money_accounts ORDER BY id`)).rows;
   if (route === 'v1/transaction/categories/list') {
@@ -78,9 +167,12 @@ export async function ledger(pool: Pool, route: string, body: unknown, query: UR
     const items = rows.slice(0, count);
     return {items, nextTimeSequenceId: rows.length > count ? String(items[items.length - 1].id) : null};
   }
-  if (!['v1/accounts/add','v1/transaction/categories/add','v1/transactions/add'].includes(route)) throw new LedgerError('接口不存在', 404);
+  if (!['v1/accounts/add','v1/transaction/categories/add','v1/transactions/add','v1/transactions/import'].includes(route)) throw new LedgerError('接口不存在', 404);
   const data = object(body);
   const key = text(data.clientSessionId, 128);
+  // Internal import keys must never be addressable by a normal clientSessionId.
+  if (key.startsWith('import:')) throw new LedgerError('请求编号使用了保留前缀');
+  if (route === 'v1/transactions/import') return importTransactions(pool, data, key);
   if (route === 'v1/accounts/add') {
     if (data.currency !== 'CNY') throw new LedgerError('首版仅支持人民币账户');
     if (data.type !== undefined && data.type !== 1) throw new LedgerError('仅支持独立账户');

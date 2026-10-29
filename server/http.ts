@@ -10,7 +10,7 @@ function result(value: unknown, status = 200, headers: Record<string, string> = 
   });
 }
 const reads = new Set(['v1/accounts/list', 'v1/transaction/categories/list', 'v1/transactions/list']);
-const writes = new Set(['v1/accounts/add', 'v1/transaction/categories/add', 'v1/transactions/add']);
+const writes = new Set(['v1/accounts/add', 'v1/transaction/categories/add', 'v1/transactions/add', 'v1/transactions/import']);
 
 export async function handle(request: Request, dependencies: { pool?: Pool; auth?: AuthConfig; sourceIp?: string } = {}): Promise<Response> {
   const url = new URL(request.url);
@@ -46,7 +46,7 @@ export async function handle(request: Request, dependencies: { pool?: Pool; auth
     if (route === 'logout' && request.method === 'POST') return result({}, 200, { 'Set-Cookie': sessionCookie('', secure) });
     if (!reads.has(route) && !writes.has(route)) return result('接口不存在', 404);
     if ((reads.has(route) && request.method !== 'GET') || (writes.has(route) && request.method !== 'POST')) return result('请求方法不支持', 405);
-    const body = request.method === 'POST' ? await readBody(request) : undefined;
+    const body = request.method === 'POST' ? await readBody(request, route === 'v1/transactions/import' ? 1024 * 1024 : 16384) : undefined;
     return result(await ledger(dependencies.pool ?? database(), route, body, url.searchParams));
   } catch (error) {
     if (error instanceof LedgerError) return result(error.message, error.status);
@@ -58,7 +58,7 @@ export async function handle(request: Request, dependencies: { pool?: Pool; auth
   }
 }
 class BodyError extends Error {}
-async function readBody(request: Request): Promise<Record<string, unknown>> {
+async function readBody(request: Request, limit = 16384): Promise<Record<string, unknown>> {
   const reader = request.body?.getReader();
   if (!reader) throw new SyntaxError();
   const chunks: Uint8Array[] = [];
@@ -67,7 +67,7 @@ async function readBody(request: Request): Promise<Record<string, unknown>> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.length;
-    if (size > 16384) { await reader.cancel(); throw new BodyError('请求内容过大'); }
+    if (size > limit) { await reader.cancel(); throw new BodyError('请求内容过大'); }
     chunks.push(value);
   }
   const body: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
