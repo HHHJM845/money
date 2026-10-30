@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">见财·验证版</string>
+    <string name="accessibility_description">仅在你授权后读取微信、支付宝、招商银行及掌上生活的支付结果或账单页面，生成本机待确认账单。不自动点击，不操作支付，不截图，不记录密码或聊天内容。可以随时在系统设置关闭。</string>
+</resources>
