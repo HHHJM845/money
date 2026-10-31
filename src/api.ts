@@ -1,7 +1,7 @@
 import type { Account, Category, Transaction } from './finance';
 
 export class ApiError extends Error {
-  constructor(message: string, public unauthorized = false, public status?: number) {
+  constructor(message: string, public unauthorized = false, public status?: number, public code?: string) {
     super(message);
   }
 }
@@ -24,12 +24,12 @@ export async function request<T>(path: string, _token = '', body?: unknown): Pro
   } catch {
     throw new ApiError('无法连接账本，请检查账本服务后重试');
   }
-  let data: { success: boolean; result: T; errorMessage?: string; error?: { message?: string; code?: number } };
+  let data: { success: boolean; result: T; errorMessage?: string; errorCode?: string; error?: { message?: string; code?: string } };
   try { data = await response.json(); } catch {
     throw new ApiError('账本服务返回异常，请稍后重试');
   }
   if (!response.ok || !data.success) {
-    throw new ApiError(data.error?.message || data.errorMessage || `请求未完成（${response.status}）`, response.status === 401, response.status);
+    throw new ApiError(data.error?.message || data.errorMessage || `请求未完成（${response.status}）`, response.status === 401, response.status, data.errorCode ?? data.error?.code);
   }
   return data.result;
 }

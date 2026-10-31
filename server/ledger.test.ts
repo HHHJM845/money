@@ -86,11 +86,12 @@ test('SQL constraints and login limit schema are present in both initialization 
 });
 
 for (const script of ['init.sql', 'increment.sql']) {
-  test(`${script}: all five tables deny Data API roles through policy-free RLS`, async () => {
+  test(`${script}: all ledger tables deny Data API roles through policy-free RLS`, async () => {
     const db = new PGlite();
     try {
       await db.exec(await readFile(new URL(`../doc/sql/${script}`, import.meta.url), 'utf8'));
-      const tables = ['money_accounts', 'money_categories', 'money_login_limits', 'money_requests', 'money_transactions'];
+      const tables = ['money_accounts', 'money_balance_history', 'money_bill_sources', 'money_bills',
+        'money_categories', 'money_changes', 'money_ledger_state', 'money_login_limits', 'money_requests', 'money_tags', 'money_transactions'];
       const metadata = await db.query<{relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean}>(`
         SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class
         WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname LIKE 'money_%' ORDER BY relname`);
@@ -123,7 +124,9 @@ for (const script of ['init.sql', 'increment.sql']) {
         for (const sql of inserts) await assert.rejects(db.query(sql), /row-level security/i);
         await db.exec('RESET ROLE');
       }
-      for (const table of tables) assert.ok((await db.query(`SELECT * FROM ${table}`)).rows.length > 0);
+      for (const table of ['money_accounts', 'money_categories', 'money_login_limits', 'money_requests', 'money_transactions']) {
+        assert.ok((await db.query(`SELECT * FROM ${table}`)).rows.length > 0);
+      }
     } finally { await db.close(); }
   });
 }

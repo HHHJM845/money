@@ -11,5 +11,5 @@
     "allowImportingTsExtensions": true,
     "types": ["vite/client", "node"]
   },
-  "include": ["src", "server", "api", "vite.config.ts"]
+  "include": ["src", "server", "shared", "api", "vite.config.ts"]
 }

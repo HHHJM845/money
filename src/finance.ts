@@ -4,7 +4,7 @@ export interface Account {
   category: number;
   type: number;
   currency: string;
-  balance: string;
+  balance: string | null;
   hidden?: boolean;
   isAsset?: boolean;
   isLiability?: boolean;
@@ -53,9 +53,9 @@ export function parseAmount(value: string): number {
 }
 
 export function money(value: number): string {
-  return (cents(value) / 100).toLocaleString('zh-CN', {
-    minimumFractionDigits: 2, maximumFractionDigits: 2,
-  });
+  const exact = BigInt(cents(value));
+  const absolute = exact < 0n ? -exact : exact;
+  return `${exact < 0n ? '-' : ''}${(absolute / 100n).toLocaleString('zh-CN')}.${String(absolute % 100n).padStart(2, '0')}`;
 }
 
 export function monthOf(seconds: number): string {
@@ -76,7 +76,7 @@ export function leafAccounts(accounts: Account[]): Account[] {
 }
 
 export function assetTotals(accounts: Account[]) {
-  const balances = leafAccounts(accounts).filter(a => a.currency === 'CNY').map(a => cents(a.balance));
+  const balances = leafAccounts(accounts).filter((a): a is Account & { balance: string } => a.currency === 'CNY' && a.balance !== null).map(a => cents(a.balance));
   const assets = sum(balances.filter(b => b > 0));
   const liabilities = -sum(balances.filter(b => b < 0));
   return { assets, liabilities, net: cents(assets - liabilities) };

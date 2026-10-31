@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "currency": "CNY",
+  "timeZone": "Asia/Shanghai",
+  "initialBalances": {"cash": 100000, "bank": 200000},
+  "operations": [
+    {"before": {}, "after": {"cash": -2500}, "balances": {"cash": 97500, "bank": 200000}},
+    {"before": {"cash": -2500}, "after": {"cash": -3000}, "balances": {"cash": 97000, "bank": 200000}},
+    {"before": {"cash": -3000}, "after": {"bank": -3000}, "balances": {"cash": 100000, "bank": 197000}},
+    {"before": {"bank": -3000}, "after": {}, "balances": {"cash": 100000, "bank": 200000}},
+    {"before": {}, "after": {"bank": -3000}, "balances": {"cash": 100000, "bank": 197000}},
+    {"before": {}, "after": {}, "balances": {"cash": 100000, "bank": 197000}}
+  ]
+}

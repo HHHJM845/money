@@ -3,14 +3,18 @@ import { createHmac } from 'node:crypto';
 import { authenticated, authConfig, issueSession, sessionCookie, verifyPassword, type AuthConfig } from './auth.js';
 import { database } from './db.js';
 import { ledger, LedgerError } from './ledger.js';
+import { bookkeeping } from './bookkeeping.js';
 
-function result(value: unknown, status = 200, headers: Record<string, string> = {}) {
-  return Response.json(status < 400 ? { success: true, result: value } : { success: false, errorMessage: value }, {
+function result(value: unknown, status = 200, headers: Record<string, string> = {}, errorCode?: string) {
+  const code = errorCode ?? (status === 401 ? 'UNAUTHORIZED' : status === 503 ? 'SERVICE_UNAVAILABLE' : 'INVALID_REQUEST');
+  return Response.json(status < 400 ? { success: true, result: value } : { success: false, errorMessage: value, errorCode: code }, {
     status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers },
   });
 }
-const reads = new Set(['v1/accounts/list', 'v1/transaction/categories/list', 'v1/transactions/list']);
-const writes = new Set(['v1/accounts/add', 'v1/transaction/categories/add', 'v1/transactions/add', 'v1/transactions/import']);
+const reads = new Set(['v1/accounts/list', 'v1/transaction/categories/list', 'v1/transactions/list',
+  'v2/snapshot', 'v2/bills/list', 'v2/bills/detail', 'v2/accounts/history', 'v2/sync/changes']);
+const writes = new Set(['v1/accounts/add', 'v1/transaction/categories/add', 'v1/transactions/add', 'v1/transactions/import',
+  'v2/bills/submit', 'v2/master/submit']);
 
 export async function handle(request: Request, dependencies: { pool?: Pool; auth?: AuthConfig; sourceIp?: string } = {}): Promise<Response> {
   const url = new URL(request.url);
@@ -47,9 +51,10 @@ export async function handle(request: Request, dependencies: { pool?: Pool; auth
     if (!reads.has(route) && !writes.has(route)) return result('接口不存在', 404);
     if ((reads.has(route) && request.method !== 'GET') || (writes.has(route) && request.method !== 'POST')) return result('请求方法不支持', 405);
     const body = request.method === 'POST' ? await readBody(request, route === 'v1/transactions/import' ? 1024 * 1024 : 16384) : undefined;
-    return result(await ledger(dependencies.pool ?? database(), route, body, url.searchParams));
+    const dispatch = route.startsWith('v2/') ? bookkeeping : ledger;
+    return result(await dispatch(dependencies.pool ?? database(), route, body, url.searchParams));
   } catch (error) {
-    if (error instanceof LedgerError) return result(error.message, error.status);
+    if (error instanceof LedgerError) return result(error.message, error.status, {}, error.code);
     if (error instanceof SyntaxError) return result('JSON 请求格式无效', 400);
     if (error instanceof BodyError) return result(error.message, 413);
     // Never return SQL errors, credentials or connection strings to the browser.

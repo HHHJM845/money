@@ -1,9 +1,9 @@
-import { createHash } from 'node:crypto';
-import type { Pool, PoolClient } from 'pg';
-
-export class LedgerError extends Error {
-  constructor(message: string, public readonly status = 400) { super(message); }
-}
+import { createHash, randomUUID } from 'node:crypto';
+import type { Pool } from 'pg';
+import { LedgerError, write } from './ledger-write.js';
+import { saveBills } from './bookkeeping.js';
+import { appendMasterChange } from './sync.js';
+export { LedgerError } from './ledger-write.js';
 
 type Data = Record<string, unknown>;
 function object(value: unknown): Data {
@@ -22,7 +22,8 @@ function id(value: unknown): string {
   if (typeof value !== 'string' || !/^[1-9]\d{0,18}$/.test(value) || BigInt(value) > 9223372036854775807n) throw new LedgerError('编号无效');
   return value;
 }
-function balance(value: unknown): string {
+function balance(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
   if (typeof value !== 'string' || !/^-?\d{1,16}$/.test(value)) throw new LedgerError('余额必须为整数分字符串');
   return String(integer(Number(value), -Number.MAX_SAFE_INTEGER));
 }
@@ -32,31 +33,6 @@ const transactionColumns = `t.id::text, t.id::text AS "timeSequenceId", t.type, 
  t.source_amount::float8 AS "sourceAmount", t.destination_amount::float8 AS "destinationAmount",
  t.category_id::text AS "categoryId", t.comment,
  json_build_object('id',c.id::text,'name',c.name,'type',c.type) AS category`;
-
-async function write(pool: Pool, key: string, route: string, payload: Data, action: (client: PoolClient) => Promise<unknown>) {
-  const hash = createHash('sha256').update(JSON.stringify([route, payload])).digest('hex');
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    // A concurrent retry waits for the winning transaction, then reads its committed response.
-    await client.query('INSERT INTO money_requests(key,payload_hash) VALUES($1,$2) ON CONFLICT DO NOTHING', [key, hash]);
-    const { rows } = await client.query<{payload_hash: string; response: unknown}>('SELECT payload_hash,response FROM money_requests WHERE key=$1 FOR UPDATE', [key]);
-    if (rows[0].payload_hash !== hash) throw new LedgerError('请求编号已用于其他内容', 409);
-    let result = rows[0].response;
-    if (result === null) {
-      result = await action(client);
-      await client.query('UPDATE money_requests SET response=$2::jsonb WHERE key=$1', [key, JSON.stringify(result)]);
-    }
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    if (error && typeof error === 'object' && 'code' in error && ['23514', '22003'].includes(String(error.code))) {
-      throw new LedgerError('金额或数据超出允许范围');
-    }
-    throw error;
-  } finally { client.release(); }
-}
 
 function digest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -118,11 +94,17 @@ async function importTransactions(pool: Pool, data: Data, sessionId: string) {
       return hash === undefined;
     });
     if (pending.length) {
-      // Bulk writes keep the 1000-row request bounded even with a remote database.
-      await client.query(`INSERT INTO money_transactions(type,time,category_id,source_account_id,source_amount,comment)
-        SELECT r.type,r.time,CASE WHEN r.type=2 THEN $2::bigint ELSE $3::bigint END,$4::bigint,r.amount,r.comment
-        FROM jsonb_to_recordset($1::jsonb) AS r(type smallint,time bigint,amount bigint,comment text)`,
-      [JSON.stringify(pending), incomeCategoryId, expenseCategoryId, accountId]);
+      await saveBills(client, pending.map(row => ({
+        billId: randomUUID(), expectedVersion: 0, action: 'save' as const, status: 'posted' as const,
+        balanceMode,
+        content: {
+          kind: row.type === 2 ? 'income' as const : 'expense' as const,
+          amountCents: row.amount, accountId, categoryId: row.type === 2 ? incomeCategoryId : expenseCategoryId,
+          occurredAt: row.time * 1000, merchant: '', note: row.comment, tagIds: [],
+          excludeFromStatistics: false, excludeFromBudget: false,
+        },
+        sources: [{ app: `import:${provider}:${accountId}`, key: row.key, capturedAt: Date.now(), ruleVersion: 'legacy-parser-v1' }],
+      })));
       await client.query(`INSERT INTO money_requests(key,payload_hash,response)
         SELECT r.key,r.hash,'{"imported":true}'::jsonb
         FROM jsonb_to_recordset($1::jsonb) AS r(key text,hash text) ORDER BY r.key`, [JSON.stringify(pending)]);
@@ -136,10 +118,6 @@ async function importTransactions(pool: Pool, data: Data, sessionId: string) {
         SELECT r.key,r.hash,'{"imported":true}'::jsonb
         FROM jsonb_to_recordset($1::jsonb) AS r(key text,hash text) ORDER BY r.key
         ON CONFLICT (key) DO NOTHING`, [JSON.stringify(aliases)]);
-      if (balanceMode === 'apply') {
-        const delta = pending.reduce((sum, row) => sum + BigInt(row.amount) * (row.type === 2 ? 1n : -1n), 0n);
-        await client.query('UPDATE money_accounts SET balance=balance+$2::bigint WHERE id=$1', [accountId, String(delta)]);
-      }
     }
     return {imported: pending.length, duplicates: rows.length - pending.length,
       anonymousDuplicates: rows.filter(row => row.anonymous && stored.has(row.key)).length,
@@ -163,7 +141,9 @@ export async function ledger(pool: Pool, route: string, body: unknown, query: UR
     const cursor = query.has('max_time') ? id(query.get('max_time')) : null;
     const {rows} = await pool.query(`SELECT ${transactionColumns} FROM money_transactions t
       JOIN money_categories c ON c.id=t.category_id
-      WHERE ($1::bigint IS NULL OR t.id < $1::bigint) ORDER BY t.id DESC LIMIT $2`, [cursor, count + 1]);
+      JOIN money_bills b ON b.legacy_id=t.id
+      WHERE b.status='posted' AND b.content->>'kind'<>'refund'
+      AND ($1::bigint IS NULL OR t.id < $1::bigint) ORDER BY t.id DESC LIMIT $2`, [cursor, count + 1]);
     const items = rows.slice(0, count);
     return {items, nextTimeSequenceId: rows.length > count ? String(items[items.length - 1].id) : null};
   }
@@ -177,15 +157,25 @@ export async function ledger(pool: Pool, route: string, body: unknown, query: UR
     if (data.currency !== 'CNY') throw new LedgerError('首版仅支持人民币账户');
     if (data.type !== undefined && data.type !== 1) throw new LedgerError('仅支持独立账户');
     const payload = {name: text(data.name), category: integer(data.category, 1, 9), currency: 'CNY', balance: balance(data.balance)};
-    return write(pool, key, route, payload, async client => (await client.query(
-      `INSERT INTO money_accounts(name,category,currency,balance) VALUES($1,$2,$3,$4) RETURNING ${accountColumns}`,
-      [payload.name,payload.category,payload.currency,payload.balance])).rows[0]);
+    return write(pool, key, route, payload, async client => {
+      const saved = (await client.query(
+        `INSERT INTO money_accounts(name,category,currency,balance) VALUES($1,$2,$3,$4) RETURNING ${accountColumns},active,version`,
+        [payload.name,payload.category,payload.currency,payload.balance])).rows[0];
+      await appendMasterChange(client, 'account', saved.id, saved);
+      return saved;
+    });
   }
   if (route === 'v1/transaction/categories/add') {
     if (data.parentId !== undefined && data.parentId !== '0') throw new LedgerError('首版仅支持平铺分类');
     const payload = {name: text(data.name), type: integer(data.type, 1, 3)};
-    return write(pool,key,route,payload,async client => (await client.query(
-      'INSERT INTO money_categories(name,type) VALUES($1,$2) RETURNING id::text,name,type',[payload.name,payload.type])).rows[0]);
+    return write(pool,key,route,payload,async client => {
+      const saved = (await client.query(
+        `INSERT INTO money_categories(name,type) VALUES($1,$2)
+         RETURNING id::text,name,type,parent_id::text AS "parentId",active,sort_order AS "sortOrder",version`,
+        [payload.name,payload.type])).rows[0];
+      await appendMasterChange(client, 'category', saved.id, saved);
+      return saved;
+    });
   }
   const type = integer(data.type, 2, 4);
   if (data.currency !== undefined && data.currency !== 'CNY') throw new LedgerError('首版仅支持人民币');
@@ -199,16 +189,13 @@ export async function ledger(pool: Pool, route: string, body: unknown, query: UR
   if (type !== 4 && (data.destinationAccountId != null || data.destinationAmount != null)) throw new LedgerError('收支不能指定转入账户');
   if (type === 4 && (payload.sourceAccountId === payload.destinationAccountId || payload.sourceAmount !== payload.destinationAmount)) throw new LedgerError('转账账户必须不同且人民币转入转出金额相等');
   return write(pool,key,route,payload,async client => {
-    const category = await client.query('SELECT type FROM money_categories WHERE id=$1',[payload.categoryId]);
-    if (category.rows[0]?.type !== type - 1) throw new LedgerError('分类不存在或与交易类型不匹配');
-    const ids = [payload.sourceAccountId, ...(payload.destinationAccountId ? [payload.destinationAccountId] : [])];
-    // Lock accounts in numeric ID order for all transfers to avoid opposite-direction deadlocks.
-    const accounts = await client.query('SELECT id,currency FROM money_accounts WHERE id = ANY($1::bigint[]) ORDER BY id FOR UPDATE',[ids]);
-    if (accounts.rows.length !== ids.length || accounts.rows.some(a => a.currency !== 'CNY')) throw new LedgerError('账户不存在或币种不支持');
-    await client.query('UPDATE money_accounts SET balance=balance+$2::bigint WHERE id=$1',[payload.sourceAccountId,type === 2 ? payload.sourceAmount : -payload.sourceAmount]);
-    if (type === 4) await client.query('UPDATE money_accounts SET balance=balance+$2::bigint WHERE id=$1',[payload.destinationAccountId,payload.destinationAmount]);
-    const saved = await client.query('INSERT INTO money_transactions(type,time,category_id,source_account_id,destination_account_id,source_amount,destination_amount,comment) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
-      [type,payload.time,payload.categoryId,payload.sourceAccountId,payload.destinationAccountId,payload.sourceAmount,payload.destinationAmount,payload.comment]);
-    return (await client.query(`SELECT ${transactionColumns} FROM money_transactions t JOIN money_categories c ON c.id=t.category_id WHERE t.id=$1`,[saved.rows[0].id])).rows[0];
+    const [bill] = await saveBills(client, [{
+      billId: randomUUID(), expectedVersion: 0, action: 'save', status: 'posted',
+      content: { kind: type === 2 ? 'income' : type === 3 ? 'expense' : 'transfer',
+        amountCents: payload.sourceAmount, accountId: payload.sourceAccountId, categoryId: payload.categoryId,
+        destinationAccountId: payload.destinationAccountId, occurredAt: payload.time * 1000,
+        merchant: '', note: payload.comment, tagIds: [], excludeFromStatistics: false, excludeFromBudget: false },
+    }]);
+    return (await client.query(`SELECT ${transactionColumns} FROM money_transactions t JOIN money_categories c ON c.id=t.category_id WHERE t.id=$1`,[bill.legacyId])).rows[0];
   });
 }

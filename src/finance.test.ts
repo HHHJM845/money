@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assetTotals, cashflow, cents, monthOf, monthTransactions, parseAmount, previousMonth, type Account, type Transaction } from './finance.ts';
+import { assetTotals, cashflow, cents, money, monthOf, monthTransactions, parseAmount, previousMonth, type Account, type Transaction } from './finance.ts';
 
 const accounts: Account[] = [
   { id: 'bank', name: '银行', category: 2, type: 1, balance: '98000', currency: 'CNY' },
@@ -33,4 +33,10 @@ test('amount parser retains cents exactly and rejects invalid values', () => {
   assert.equal(parseAmount('123.4'), 12340);
   for (const value of ['0', '-2', '1.123', '1e3', 'abc']) assert.throws(() => parseAmount(value));
   assert.throws(() => cents(Number.MAX_SAFE_INTEGER + 1));
+});
+test('money formatting preserves cents across the entire safe integer range', () => {
+  assert.equal(money(Number.MAX_SAFE_INTEGER), '90,071,992,547,409.91');
+  assert.equal(money(-Number.MAX_SAFE_INTEGER), '-90,071,992,547,409.91');
+  assert.equal(money(29), '0.29');
+  assert.equal(money(0), '0.00');
 });

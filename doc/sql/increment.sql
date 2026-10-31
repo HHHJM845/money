@@ -75,3 +75,200 @@ ALTER TABLE money_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE money_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE money_login_limits ENABLE ROW LEVEL SECURITY;
 COMMIT;
+
+-- 2026-10-30 M2 可纠错账本：在既有五表后执行，保留旧流水身份和余额。
+BEGIN;
+ALTER TABLE money_accounts ALTER COLUMN balance DROP NOT NULL;
+COMMENT ON COLUMN money_accounts.balance IS '可选账面余额，单位分，空值表示未设置，负数表示负债';
+ALTER TABLE money_categories ADD COLUMN parent_id bigint;
+ALTER TABLE money_categories ADD COLUMN active boolean NOT NULL DEFAULT true;
+ALTER TABLE money_categories ADD COLUMN sort_order integer NOT NULL DEFAULT 0;
+COMMENT ON TABLE money_categories IS '支持两级的交易分类';
+COMMENT ON COLUMN money_categories.parent_id IS '一级分类编号，空值表示一级分类，由应用层校验层级';
+COMMENT ON COLUMN money_categories.active IS '分类是否启用，历史分类停用而不删除';
+COMMENT ON COLUMN money_categories.sort_order IS '显示排序';
+CREATE TABLE money_tags (
+ id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ name text NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
+ active boolean NOT NULL DEFAULT true,
+ sort_order integer NOT NULL DEFAULT 0
+);
+COMMENT ON TABLE money_tags IS '账单可选标签';
+COMMENT ON COLUMN money_tags.id IS '标签编号';
+COMMENT ON COLUMN money_tags.name IS '标签名称';
+COMMENT ON COLUMN money_tags.active IS '标签是否启用';
+COMMENT ON COLUMN money_tags.sort_order IS '显示排序';
+CREATE TABLE money_ledger_state (
+ id smallint PRIMARY KEY CHECK(id=1),
+ sequence bigint NOT NULL DEFAULT 0 CHECK(sequence>=0)
+);
+INSERT INTO money_ledger_state(id) VALUES(1);
+COMMENT ON TABLE money_ledger_state IS '单用户账本写锁及按提交顺序递增的变更游标';
+COMMENT ON COLUMN money_ledger_state.id IS '固定为一的账本编号';
+COMMENT ON COLUMN money_ledger_state.sequence IS '最后提交的变更序号，接口使用整数串';
+CREATE TABLE money_bills (
+ id uuid PRIMARY KEY,
+ legacy_id bigint UNIQUE,
+ version integer NOT NULL CHECK(version>0),
+ status text NOT NULL CHECK(status IN ('pending','posted','deleted')),
+ content jsonb NOT NULL CHECK(jsonb_typeof(content)='object'),
+ balance_mode text NOT NULL CHECK(balance_mode IN ('apply','preserve')),
+ applied_effect jsonb NOT NULL CHECK(jsonb_typeof(applied_effect)='object'),
+ restore_effect jsonb NOT NULL CHECK(jsonb_typeof(restore_effect)='object'),
+ restore_status text NOT NULL CHECK(restore_status IN ('pending','posted')),
+ created_at bigint NOT NULL,
+ updated_at bigint NOT NULL,
+ deleted_at bigint,
+ CHECK((status='deleted')=(deleted_at IS NOT NULL))
+);
+CREATE INDEX money_bills_refund_idx ON money_bills((content->>'refundOfBillId'));
+COMMENT ON TABLE money_bills IS '权威账单，旧流水表为兼容投影';
+COMMENT ON COLUMN money_bills.id IS '客户端稳定账单标识，旧流水使用确定性映射';
+COMMENT ON COLUMN money_bills.legacy_id IS '保留的旧流水编号，待确认或退款可为空';
+COMMENT ON COLUMN money_bills.version IS '实体版本，修改需匹配预期版本';
+COMMENT ON COLUMN money_bills.status IS '业务状态：待确认、已入账、已删除';
+COMMENT ON COLUMN money_bills.content IS '结构化账单：类型、整数分金额、发生毫秒、账户、分类、商户、备注、标签、统计和预算开关、退款原账';
+COMMENT ON COLUMN money_bills.balance_mode IS '余额模式：实际应用或保留现有余额';
+COMMENT ON COLUMN money_bills.applied_effect IS '当前实际已应用的各账户余额影响，单位分';
+COMMENT ON COLUMN money_bills.restore_effect IS '删除前实际影响，恢复只重放一次';
+COMMENT ON COLUMN money_bills.restore_status IS '删除前业务状态';
+COMMENT ON COLUMN money_bills.created_at IS '录入时间，Unix毫秒';
+COMMENT ON COLUMN money_bills.updated_at IS '最后修改时间，Unix毫秒';
+COMMENT ON COLUMN money_bills.deleted_at IS '删除时间，Unix毫秒，空值表示未删除';
+CREATE TABLE money_bill_sources (
+ app text NOT NULL CHECK(length(app) BETWEEN 1 AND 100),
+ key text NOT NULL CHECK(length(key) BETWEEN 1 AND 256),
+ bill_id uuid NOT NULL,
+ captured_at bigint NOT NULL,
+ rule_version text NOT NULL CHECK(length(rule_version) BETWEEN 1 AND 100),
+ PRIMARY KEY(app,key)
+);
+CREATE INDEX money_bill_sources_bill_idx ON money_bill_sources(bill_id);
+COMMENT ON TABLE money_bill_sources IS '账单最小来源证据，同一来源标识只关联一笔账';
+COMMENT ON COLUMN money_bill_sources.app IS '来源应用或导入范围';
+COMMENT ON COLUMN money_bill_sources.key IS '来源范围内交易标识或摘要，不保存页面原文';
+COMMENT ON COLUMN money_bill_sources.bill_id IS '关联账单标识，由应用层校验';
+COMMENT ON COLUMN money_bill_sources.captured_at IS '采集时间，Unix毫秒';
+COMMENT ON COLUMN money_bill_sources.rule_version IS '识别规则版本';
+CREATE TABLE money_changes (
+ sequence bigint PRIMARY KEY,
+ bill_id uuid NOT NULL,
+ snapshot jsonb NOT NULL
+);
+COMMENT ON TABLE money_changes IS '按提交顺序的账单变更，保留删除版本';
+COMMENT ON COLUMN money_changes.sequence IS '服务端变更序号，不能使用业务发生时间替代';
+COMMENT ON COLUMN money_changes.bill_id IS '账单标识';
+COMMENT ON COLUMN money_changes.snapshot IS '提交时的版本快照，过期删除需清理完整内容';
+CREATE TABLE money_balance_history (
+ sequence bigint NOT NULL,
+ account_id bigint NOT NULL,
+ bill_id uuid NOT NULL,
+ delta bigint NOT NULL CHECK(delta BETWEEN -9007199254740991 AND 9007199254740991),
+ balance_after bigint NOT NULL CHECK(balance_after BETWEEN -9007199254740991 AND 9007199254740991),
+ reason text NOT NULL CHECK(reason IN ('save','delete','restore')),
+ PRIMARY KEY(sequence,account_id)
+);
+COMMENT ON TABLE money_balance_history IS '每次账单操作实际余额变化';
+COMMENT ON COLUMN money_balance_history.sequence IS '引起变化的提交序号';
+COMMENT ON COLUMN money_balance_history.account_id IS '账户编号';
+COMMENT ON COLUMN money_balance_history.bill_id IS '账单标识';
+COMMENT ON COLUMN money_balance_history.delta IS '本次实际增减，整数分';
+COMMENT ON COLUMN money_balance_history.balance_after IS '本次操作后的账面余额，整数分';
+COMMENT ON COLUMN money_balance_history.reason IS '新增修改、删除或恢复原因';
+ALTER TABLE money_tags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE money_ledger_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE money_bills ENABLE ROW LEVEL SECURITY;
+ALTER TABLE money_bill_sources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE money_changes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE money_balance_history ENABLE ROW LEVEL SECURITY;
+
+-- 旧结构不含每笔实际余额影响，无法区分历史导入的保留/应用模式。
+-- 以升级时余额为基准保留，不猜测曾扣款；后续调整应显式校正余额。
+INSERT INTO money_bills(id,legacy_id,version,status,content,balance_mode,applied_effect,restore_effect,restore_status,created_at,updated_at)
+SELECT md5('money-legacy:'||id::text)::uuid,id,1,'posted',
+ jsonb_build_object('kind',CASE type WHEN 2 THEN 'income' WHEN 3 THEN 'expense' ELSE 'transfer' END,
+ 'amountCents',source_amount,'accountId',source_account_id::text,'categoryId',category_id::text,
+ 'destinationAccountId',destination_account_id::text,'occurredAt',time*1000,'merchant','','note',comment,
+ 'tagIds','[]'::jsonb,'excludeFromStatistics',false,'excludeFromBudget',false),
+ 'preserve','{}'::jsonb,'{}'::jsonb,'posted',
+ (extract(epoch FROM transaction_timestamp())*1000)::bigint,(extract(epoch FROM transaction_timestamp())*1000)::bigint
+FROM money_transactions;
+INSERT INTO money_changes(sequence,bill_id,snapshot)
+SELECT row_number() OVER(ORDER BY legacy_id),id,
+ jsonb_build_object('billId',id,'legacyId',legacy_id::text,'version',version,'status',status,'content',content,
+ 'balanceMode',balance_mode,'createdAt',created_at,'updatedAt',updated_at,'deletedAt',deleted_at,
+ 'changeSequence',(row_number() OVER(ORDER BY legacy_id))::text)
+FROM money_bills;
+UPDATE money_ledger_state SET sequence=(SELECT coalesce(max(sequence),0) FROM money_changes) WHERE id=1;
+COMMIT;
+
+-- 2026-10-30 M2a 追溯旧版手动记账的成功响应，恢复有确切证据的余额影响。
+-- 导入响应不含流水身份，仍保留余额；不猜测无法追溯的记录。
+BEGIN;
+WITH known_manual AS (
+ SELECT t.id,
+  jsonb_build_object(t.source_account_id::text,CASE t.type WHEN 2 THEN t.source_amount ELSE -t.source_amount END)
+  || CASE WHEN t.type=4 THEN jsonb_build_object(t.destination_account_id::text,t.destination_amount) ELSE '{}'::jsonb END AS effect
+ FROM money_transactions t WHERE EXISTS (
+  SELECT 1 FROM money_requests r WHERE r.response->>'id'=t.id::text
+   AND r.response->>'timeSequenceId'=t.id::text AND r.response->>'type'=t.type::text
+   AND r.response->>'sourceAccountId'=t.source_account_id::text
+   AND r.response->>'sourceAmount'=t.source_amount::text
+   AND r.response->>'time'=t.time::text
+   AND r.response->>'categoryId'=t.category_id::text
+   AND coalesce(r.response->>'destinationAccountId','')=coalesce(t.destination_account_id::text,'')
+   AND coalesce(r.response->>'destinationAmount','')=coalesce(t.destination_amount::text,'')
+   AND r.response->>'comment'=t.comment
+ )
+)
+UPDATE money_bills b SET balance_mode='apply',applied_effect=k.effect,restore_effect=k.effect,
+ version=version+1,updated_at=(extract(epoch FROM transaction_timestamp())*1000)::bigint
+FROM known_manual k WHERE b.legacy_id=k.id AND b.version=1 AND b.balance_mode='preserve' AND b.status='posted';
+INSERT INTO money_changes(sequence,bill_id,snapshot)
+SELECT (SELECT sequence FROM money_ledger_state WHERE id=1)+row_number() OVER(ORDER BY legacy_id),id,
+ jsonb_build_object('billId',id,'legacyId',legacy_id::text,'version',version,'status',status,'content',content,
+ 'balanceMode',balance_mode,'createdAt',created_at,'updatedAt',updated_at,'deletedAt',deleted_at,
+ 'changeSequence',((SELECT sequence FROM money_ledger_state WHERE id=1)+row_number() OVER(ORDER BY legacy_id))::text)
+FROM money_bills WHERE id=md5('money-legacy:'||legacy_id::text)::uuid AND version=2 AND balance_mode='apply';
+UPDATE money_ledger_state SET sequence=(SELECT coalesce(max(sequence),0) FROM money_changes) WHERE id=1;
+COMMIT;
+
+-- 2026-10-30 M2b 账单快照按身份查找最新变更，避免每笔全表扫描。
+BEGIN;
+CREATE INDEX money_changes_bill_idx ON money_changes(bill_id,sequence DESC);
+COMMIT;
+
+-- 2026-10-30 P1 双端增量同步、主数据版本与显式余额校正历史。
+-- 升级时暂停旧版写入；保留现有账户、分类、标签及全部账务记录。
+BEGIN;
+ALTER TABLE money_accounts ADD COLUMN active boolean NOT NULL DEFAULT true;
+ALTER TABLE money_accounts ADD COLUMN version integer NOT NULL DEFAULT 1 CHECK(version>0);
+COMMENT ON COLUMN money_accounts.active IS '账户是否启用，停用后历史账单仍保留';
+COMMENT ON COLUMN money_accounts.version IS '账户设置版本，余额交易不单独递增此版本';
+ALTER TABLE money_categories ADD COLUMN version integer NOT NULL DEFAULT 1 CHECK(version>0);
+COMMENT ON COLUMN money_categories.version IS '分类设置版本，修改需匹配预期版本';
+ALTER TABLE money_tags ADD COLUMN version integer NOT NULL DEFAULT 1 CHECK(version>0);
+COMMENT ON COLUMN money_tags.version IS '标签设置版本，修改需匹配预期版本';
+ALTER TABLE money_changes ALTER COLUMN bill_id DROP NOT NULL;
+ALTER TABLE money_changes ADD COLUMN entity_type text NOT NULL DEFAULT 'bill' CHECK(entity_type IN ('bill','account','category','tag'));
+ALTER TABLE money_changes ADD COLUMN entity_id text;
+ALTER TABLE money_changes ADD CONSTRAINT money_changes_identity_check CHECK(
+ (entity_type='bill' AND bill_id IS NOT NULL AND entity_id IS NULL)
+ OR (entity_type<>'bill' AND bill_id IS NULL AND entity_id IS NOT NULL));
+COMMENT ON TABLE money_changes IS '按提交顺序的账单与主数据变更，保留删除版本';
+COMMENT ON COLUMN money_changes.bill_id IS '账单变更的稳定标识，主数据变更为空';
+COMMENT ON COLUMN money_changes.entity_type IS '变更实体类型：账单、账户、分类或标签';
+COMMENT ON COLUMN money_changes.entity_id IS '主数据实体编号，账单使用独立的稳定标识列';
+ALTER TABLE money_balance_history ALTER COLUMN bill_id DROP NOT NULL;
+ALTER TABLE money_balance_history ALTER COLUMN delta DROP NOT NULL;
+ALTER TABLE money_balance_history ALTER COLUMN balance_after DROP NOT NULL;
+ALTER TABLE money_balance_history DROP CONSTRAINT money_balance_history_reason_check;
+ALTER TABLE money_balance_history ADD CONSTRAINT money_balance_history_reason_check CHECK(reason IN ('save','delete','restore','balance'));
+ALTER TABLE money_balance_history ADD COLUMN note text NOT NULL DEFAULT '';
+COMMENT ON TABLE money_balance_history IS '每次账单操作或显式余额校正的实际变化';
+COMMENT ON COLUMN money_balance_history.bill_id IS '关联账单标识，显式余额操作为空';
+COMMENT ON COLUMN money_balance_history.delta IS '本次实际增减，整数分，未知余额转换为空';
+COMMENT ON COLUMN money_balance_history.balance_after IS '本次操作后的账面余额，整数分，停用余额为空';
+COMMENT ON COLUMN money_balance_history.reason IS '新增修改、删除、恢复或显式余额操作';
+COMMENT ON COLUMN money_balance_history.note IS '显式余额操作的用户说明';
+COMMIT;
