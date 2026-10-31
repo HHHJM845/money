@@ -54,25 +54,60 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors: string[] = [];
+  async function fillMerchant(value: string) {
+    const field = page.getByLabel('商户 / 摘要', { exact: true });
+    if (!await field.isVisible()) await page.locator('.entry-optional > summary').click();
+    await field.fill(value);
+  }
   page.on('pageerror', (error: Error) => errors.push(error.message));
   await page.goto(origin);
   await page.getByLabel('账号', { exact: true }).fill(auth.username);
   await page.getByLabel('密码', { exact: true }).fill(password);
   await page.getByRole('button', { name: '登录账本', exact: true }).click();
   await page.getByRole('heading', { name: '账单', exact: true }).waitFor();
-  await page.getByRole('button', { name: '导入账单', exact: true }).click();
+  await page.getByRole('button', { name: '记一笔', exact: true }).click();
+  await page.getByLabel('备注', { exact: true }).fill('真实接口验证');
+  const keypad = page.getByRole('group', { name: '金额键盘', exact: true });
+  for (const name of ['小数点', '2', '8', '删除一位', '9']) {
+    await keypad.getByRole('button', { name, exact: true }).click();
+  }
+  assert.equal(await page.getByLabel('金额（元）', { exact: true }).inputValue(), '0.29');
+  await mkdir('.local', { recursive: true });
+  for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    const keypadBox = await keypad.boundingBox();
+    const saveBox = await page.getByRole('button', { name: '保存到账本', exact: true }).boundingBox();
+    assert(keypadBox && saveBox);
+    assert(keypadBox.y >= 0 && keypadBox.y + keypadBox.height <= viewport.height,
+      `Keypad must fit ${viewport.width}x${viewport.height}`);
+    assert(keypadBox.y + keypadBox.height <= saveBox.y, 'Save bar must not cover keypad');
+    for (const label of ['账户', '时间（北京时间）']) {
+      const controlBox = await page.getByLabel(label, { exact: true }).boundingBox();
+      assert(controlBox && controlBox.y >= 0 && controlBox.y + controlBox.height <= keypadBox.y,
+        `${label} must remain above the keypad at ${viewport.width}x${viewport.height}`);
+    }
+    const categoryBox = await page.locator('.category-picker').boundingBox();
+    const firstCategoryBox = await page.locator('.category-choice').first().boundingBox();
+    assert(categoryBox && firstCategoryBox && firstCategoryBox.y + firstCategoryBox.height <= categoryBox.y + categoryBox.height,
+      `At least one complete category row must fit ${viewport.width}x${viewport.height}`);
+    assert.equal(await page.getByRole('dialog').evaluate((element: HTMLElement) => element.scrollWidth > element.clientWidth), false);
+    await page.screenshot({ path: `.local/yimu-entry-empty-${viewport.width}.png` });
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('button', { name: '保存到账本', exact: true }).click();
+  await page.getByRole('dialog').getByRole('alert').waitFor();
+  assert.equal((await (await page.request.get(`${origin}/api/v2/snapshot.json`)).json()).result.bills.length, 0);
   await page.getByRole('dialog').getByRole('button', { name: '创建账户', exact: true }).click();
   await page.getByLabel('账户名称', { exact: true }).fill('验证储蓄卡');
   await page.getByLabel('当前余额（人民币元）', { exact: true }).fill('1000');
   const createdAccountResponse = page.waitForResponse('**/api/v2/master/submit.json');
-  await page.getByRole('dialog').getByRole('button', { name: '创建账户', exact: true }).click();
+  await page.getByRole('dialog', { name: '创建账户', exact: true }).getByRole('button', { name: '创建账户', exact: true }).click();
   const createdAccount = await createdAccountResponse;
   assert.equal(createdAccount.status(), 200, JSON.stringify(await createdAccount.json()));
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  await page.getByLabel('账户筛选').locator('option', { hasText: '验证储蓄卡' }).waitFor({ state: 'attached' });
-  await page.getByRole('button', { name: '记一笔', exact: true }).click();
-  await page.locator('input[name=amount]').fill('0.29');
-  await page.getByLabel('备注', { exact: true }).fill('真实接口验证');
+  await page.getByRole('dialog', { name: '创建账户', exact: true }).waitFor({ state: 'hidden' });
+  assert.equal(await page.getByLabel('金额（元）', { exact: true }).inputValue(), '0.29');
+  assert.equal(await page.getByLabel('备注', { exact: true }).inputValue(), '真实接口验证');
+  assert.equal(await page.getByLabel('账户', { exact: true }).locator('option:checked').innerText(), '验证储蓄卡');
   await page.getByRole('button', { name: '保存到账本', exact: true }).click();
   await page.getByRole('button').filter({ hasText: '真实接口验证' }).waitFor();
   await page.reload();
@@ -287,7 +322,7 @@ try {
   await originalRow().click();
   await page.getByRole('button', { name: '登记退款', exact: true }).click();
   await page.getByLabel('金额（元）', { exact: true }).fill('0.10');
-  await page.getByLabel('商户 / 摘要', { exact: true }).fill('退款核对');
+  await fillMerchant('退款核对');
   await page.getByRole('button', { name: '保存到账本', exact: true }).click();
   await page.locator('.transaction-row').filter({ hasText: '退款核对' }).waitFor();
   assert.equal(await accountBalance(), baseline + 9);
@@ -300,7 +335,7 @@ try {
   assert.equal(await accountBalance(), baseline - 1);
 
   await page.getByRole('button', { name: '记一笔', exact: true }).click();
-  await page.getByLabel('商户 / 摘要', { exact: true }).fill('待确认核对');
+  await fillMerchant('待确认核对');
   await page.getByLabel('账户', { exact: true }).selectOption('');
   await page.getByRole('button', { name: '存为待确认', exact: true }).click();
   await page.locator('.pending-row').filter({ hasText: '待确认核对' }).waitFor();
@@ -347,7 +382,7 @@ try {
   for (const merchant of ['连续保存一', '连续保存二']) {
     await page.getByRole('button', { name: '记一笔', exact: true }).click();
     await page.getByLabel('金额（元）', { exact: true }).fill('0.01');
-    await page.getByLabel('商户 / 摘要', { exact: true }).fill(merchant);
+    await fillMerchant(merchant);
     await page.getByRole('button', { name: '保存到账本', exact: true }).click();
     await page.getByRole('dialog').waitFor({ state: 'hidden' });
   }
@@ -375,7 +410,7 @@ try {
   try {
     await page.getByRole('button', { name: '记一笔', exact: true }).click();
     await page.getByLabel('金额（元）', { exact: true }).fill('0.01');
-    await page.getByLabel('商户 / 摘要', { exact: true }).fill('过期迟到确认');
+    await fillMerchant('过期迟到确认');
     await page.getByRole('button', { name: '保存到账本', exact: true }).click();
     await observedExpiredAck;
     const expiring = (await ledgerSnapshot()).bills.find(b => b.content.merchant === '过期迟到确认')!;
@@ -688,7 +723,7 @@ try {
   page.on('request', observeBill);
   await page.getByRole('button', { name: '记一笔', exact: true }).click();
   await page.getByLabel('金额（元）', { exact: true }).fill('0.01');
-  await page.getByLabel('商户 / 摘要', { exact: true }).fill('账单重载恢复');
+  await fillMerchant('账单重载恢复');
   await page.route('**/api/v2/bills/submit.json', async (route: { fetch: () => Promise<unknown>; abort: () => Promise<void> }) => {
     await route.fetch(); await route.abort();
   }, { times: 1 });

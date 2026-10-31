@@ -71,7 +71,7 @@ internal fun BillDetail(bill: BillView, state: LedgerState, actions: LedgerActio
                 FieldLine("云端标签", remote.tagIds.joinToString(" · ") { id -> state.metadata.tags.find { it.id == id }?.name ?: id })
             } else Text("尚未取得云端内容，请先重新同步。")
             if (candidateChanged) ErrorNotice("云端候选已有更新。请刷新并核对后再处理冲突。")
-            TextButton(onClick = {
+            TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = {
                 runAction { if (!actions.synchronize()) error = "获取云端状态未完成，请检查网络和登录后重试。" }
             }, enabled = !busy) { Text("重新获取云端状态") }
             OutlinedButton(onClick = {
@@ -106,15 +106,15 @@ internal fun BillDetail(bill: BillView, state: LedgerState, actions: LedgerActio
                 modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Undo, null); Spacer(Modifier.width(8.dp)); Text("登记部分 / 全部退款")
             }
-            TextButton(onClick = { confirming = true }, enabled = !busy) {
+            TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { confirming = true }, enabled = !busy) {
                 Icon(Icons.Default.DeleteOutline, null); Spacer(Modifier.width(8.dp)); Text("移入回收站")
             }
         }
-        if (c.refundOfBillId != null) TextButton(onClick = { linked(c.refundOfBillId) }, enabled = !busy) { Text("查看关联原支出") }
+        if (c.refundOfBillId != null) TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { linked(c.refundOfBillId) }, enabled = !busy) { Text("查看关联原支出") }
         if (refunds.isNotEmpty()) {
             SectionLabel("关联退款")
             refunds.forEach { row ->
-                TextButton(onClick = { linked(row.billId) }, enabled = !busy) {
+                TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { linked(row.billId) }, enabled = !busy) {
                     Text("${dateLabel(row.content.occurredAt)} · ¥${yuan(row.content.amountCents)} · ${if (row.status == "deleted") "已删除" else if (row.status == "pending") "待确认" else "已入账"}")
                 }
             }
@@ -143,8 +143,8 @@ internal fun BillDetail(bill: BillView, state: LedgerState, actions: LedgerActio
     }
     if (confirming) AlertDialog(onDismissRequest = { confirming = false },
         title = { Text("移入回收站？") }, text = { Text("删除将撤销此账单实际应用的余额影响，30 天内可恢复。有关联退款时需先处理退款。") },
-        confirmButton = { TextButton(onClick = {
+        confirmButton = { TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = {
             confirming = false; runAction { actions.delete(bill.billId); close() }
         }, enabled = !busy) { Text("删除") } },
-        dismissButton = { TextButton(onClick = { confirming = false }) { Text("取消") } })
+        dismissButton = { TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { confirming = false }) { Text("取消") } })
 }

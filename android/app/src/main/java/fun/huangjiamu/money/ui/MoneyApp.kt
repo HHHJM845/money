@@ -1,6 +1,7 @@
 package `fun`.huangjiamu.money.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -87,7 +88,7 @@ internal fun MoneyApp(state: LedgerState, actions: LedgerActions, capture: Captu
                             if (state.syncError.isNotBlank()) Text(state.syncError, style = MaterialTheme.typography.bodySmall,
                                 maxLines = 3, overflow = TextOverflow.Ellipsis)
                         }
-                        if (state.authExpired) TextButton(onClick = { loginOpen = true }) { Text("登录") }
+                        if (state.authExpired) TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { loginOpen = true }) { Text("登录") }
                     }
                 }
             }
@@ -161,7 +162,9 @@ internal fun MoneyApp(state: LedgerState, actions: LedgerActions, capture: Captu
             EntrySheet(state.metadata, bill, original, save = { id, content, status ->
                 actions.save(id, content, status)
                 message = "已保存到本机，等待云端确认"
-            }, close = { entry = null }, refundableCents = refundable)
+            }, close = { entry = null }, refundableCents = refundable, actions = actions,
+                pendingMasterRequests = pendingMasterRequests, masterRequestError = masterRequestError,
+                masterRequestsLoading = masterRequestsLoading)
         }
     }
     if (loginOpen) LoginPage(actions.login, close = { loginOpen = false })
@@ -175,7 +178,7 @@ internal fun MonthSelector(month: String, choose: (String) -> Unit) {
         }
         Text("${month.substring(0, 4)} 年 ${month.substring(5).toInt()} 月", style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.weight(1f))
-        TextButton(onClick = { choose(currentMonth()) }) { Text("本月") }
+        TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { choose(currentMonth()) }) { Text("本月") }
         IconButton(onClick = { choose(YearMonth.parse(month).plusMonths(1).toString()) }) {
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "下个月")
         }
@@ -190,7 +193,7 @@ internal fun MonthlySummary(totals: `fun`.huangjiamu.money.domain.SummaryTotals)
         Text("¥${yuan(totals.netExpenseCents)}", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.testTag("net-expense"))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("月结余  ¥${yuan(totals.surplusCents)}", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            Text("收入 ¥${yuan(totals.incomeCents)}    月结余  ¥${yuan(totals.surplusCents)}", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             IconButton(onClick = { expanded = !expanded }) {
                 Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, "展开收支明细")
             }
@@ -232,24 +235,27 @@ internal fun BillList(bills: List<BillView>, metadata: Metadata, pending: Boolea
 @Composable
 internal fun BillRow(bill: BillView, metadata: Metadata, open: () -> Unit) {
     val c = bill.content
-    Row(Modifier.fillMaxWidth().clickable(onClick = open).padding(horizontal = 20.dp, vertical = 14.dp),
+    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).clickable(onClick = open).padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Icon(when (c.kind) { "income" -> Icons.Default.SouthWest; "transfer" -> Icons.Default.SwapHoriz
-            "refund" -> Icons.Default.Undo; else -> Icons.Default.ShoppingBag }, null,
-            tint = if (c.kind in listOf("income", "refund")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(shape = androidx.compose.foundation.shape.CircleShape, color = MaterialTheme.colorScheme.background) {
+            Icon(categoryIcon(categoryLabel(metadata, c.categoryId)), null, Modifier.padding(10.dp).size(22.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(c.merchant.ifBlank { c.note.ifBlank { kindLabel(c.kind) } }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            Text(categoryLabel(metadata, c.categoryId), maxLines = 2, overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-            Text("${kindLabel(c.kind)} · ${categoryLabel(metadata, c.categoryId)} · ${accountLabel(metadata, c.accountId)}",
+            Text("${dateLabel(c.occurredAt, "HH:mm")} · ${accountLabel(metadata, c.accountId)}",
                 maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (c.merchant.isNotBlank() || c.note.isNotBlank()) Text(c.merchant.ifBlank { c.note },
+                maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
             if (bill.syncState != "synced") Text(syncLabel(bill.syncState), style = MaterialTheme.typography.labelSmall,
                 color = if (bill.syncState in listOf("failed", "conflict")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Column(horizontalAlignment = Alignment.End, modifier = Modifier.widthIn(max = 140.dp)) {
             Text((when (c.kind) { "income", "refund" -> "+"; "expense" -> "−"; else -> "" }) + yuan(c.amountCents),
-                style = MaterialTheme.typography.titleMedium)
-            Text(dateLabel(c.occurredAt, "HH:mm"), style = MaterialTheme.typography.labelSmall)
+                style = MaterialTheme.typography.titleMedium,
+                color = if (c.kind == "expense") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
         }
     }
     HorizontalDivider(Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
@@ -273,6 +279,6 @@ private fun Filters(metadata: Metadata, bills: List<BillView>, filter: BillFilte
             (filter.from.isBlank() || filter.until.isBlank() || filter.from <= filter.until)
         if (!datesValid) ErrorNotice("请输入有效日期，结束日期不能早于开始日期")
         Button(onClick = close, enabled = datesValid, modifier = Modifier.fillMaxWidth()) { Text("查看结果") }
-        TextButton(onClick = reset) { Text("清除筛选") }
+        TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = reset) { Text("清除筛选") }
     }
 }

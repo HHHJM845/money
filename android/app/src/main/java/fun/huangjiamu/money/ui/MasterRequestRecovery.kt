@@ -106,7 +106,7 @@ internal fun MasterRequestRecovery(request: PendingMasterRequest, actions: Ledge
             Icon(Icons.Default.Refresh, null)
             Text(if (busy) "正在确认…" else "重试原请求")
         }
-        TextButton(onClick = { recordInfoExpanded = !recordInfoExpanded }, modifier = Modifier.fillMaxWidth()) {
+        TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { recordInfoExpanded = !recordInfoExpanded }, modifier = Modifier.fillMaxWidth()) {
             Text("记录信息")
             Icon(if (recordInfoExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
         }

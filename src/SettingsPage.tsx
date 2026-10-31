@@ -25,22 +25,22 @@ const balanceLabel = (balance: string | null) => balance === null ? '未设置' 
 const balanceValue = (balance: string | null) => balance === null ? '' : money(cents(balance)).replaceAll(',', '');
 
 function MutationFeedback({ mutation, complete }: {
-  mutation: ReturnType<typeof useFrozenMutation<MasterResult>>; complete: () => void;
+  mutation: ReturnType<typeof useFrozenMutation<MasterResult>>; complete: (result: MasterResult) => void;
 }) {
   return <>
     {mutation.error && <p className="error" role="alert">{mutation.error}</p>}
     {mutation.uncertain && <div className="uncertain-panel" role="status"><p>尚未确认服务器是否保存。内容已锁定，请用原请求重试。</p>
       {mutation.needsLogin ? <MutationLogin busy={mutation.busy} confirm={async (username, password) => {
-        if (await mutation.reauthenticate(username, password)) complete();
+        const result = await mutation.reauthenticate(username, password); if (result) complete(result);
       }} /> : <button type="button" className="primary full" disabled={mutation.busy} onClick={async () => {
-        if (await mutation.execute()) complete();
+        const result = await mutation.execute(); if (result) complete(result);
       }}>{mutation.busy ? '正在确认…' : '重试确认本次操作'}</button>}
     </div>}
   </>;
 }
 
 function MasterDialog({ entityType, entity, data, close, saved }: {
-  entityType: MasterType; entity: Master | null; data?: LedgerSnapshot; close: () => void; saved: () => void;
+  entityType: MasterType; entity: Master | null; data?: LedgerSnapshot; close: () => void; saved: (result: MasterResult) => void;
 }) {
   const [base, setBase] = useState(entity);
   const [type, setType] = useState(entity && 'parentId' in entity ? entity.type : 2);
@@ -87,7 +87,7 @@ function MasterDialog({ entityType, entity, data, close, saved }: {
         expectedVersion: base?.version ?? 0, action: 'save', content,
       };
       setReviewed(false);
-      if (await mutation.execute(payload)) saved();
+      const result = await mutation.execute(payload); if (result) saved(result);
     } catch (e) { setError(errorText(e)); }
   }
   return <LedgerDialog title={`${entity ? '编辑' : '创建'}${noun}`} close={close} locked={mutation.locked}>
@@ -124,7 +124,7 @@ function MasterDialog({ entityType, entity, data, close, saved }: {
   </LedgerDialog>;
 }
 
-export function AccountDialog({ close, saved }: { close: () => void; saved: () => void }) {
+export function AccountDialog({ close, saved }: { close: () => void; saved: (result: MasterResult) => void }) {
   return <MasterDialog entityType="account" entity={null} close={close} saved={saved} />;
 }
 

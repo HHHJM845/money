@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import `fun`.huangjiamu.money.data.*
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.*
+import org.json.JSONObject
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -15,7 +16,7 @@ import org.robolectric.annotation.Config
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [28], application = Application::class)
+@Config(sdk = [28], application = Application::class, qualifiers = "w412dp-h915dp")
 class LedgerUiTest {
     @get:Rule val compose = createComposeRule()
 
@@ -48,6 +49,72 @@ class LedgerUiTest {
         compose.onNodeWithTag("bill-search").assertExists()
     }
 
+    @Test fun accountCreationKeepsDraftAndSelectsConfirmedAccount() {
+        var saved: BillContent? = null
+        val liveMetadata = mutableStateOf(metadata.copy(accounts = emptyList()))
+        val creation = actions().copy(synchronize = {
+            liveMetadata.value = metadata.copy(accounts = listOf(AccountView("77", "新账户", null, "2", "CNY")))
+            true
+        }, request = { _, body ->
+            assertTrue(body!!.getJSONObject("content").isNull("balance"))
+            JSONObject().put("entityId", "77").put("snapshot",
+                JSONObject().put("id", "77").put("name", "新账户").put("active", true))
+        })
+        compose.setContent { MoneyTheme {
+            EntrySheet(liveMetadata.value, null, save = { _, content, _ -> saved = content },
+                close = {}, actions = creation)
+        } }
+        compose.onNodeWithText("餐饮").performClick()
+        compose.onNodeWithTag("key-8").performClick()
+        compose.onNodeWithTag("entry-note").performTextInput("保留草稿")
+        compose.onNodeWithText("创建账户").performClick()
+        compose.onNodeWithTag("master-name").performTextInput("新账户")
+        compose.onNodeWithTag("master-save").performScrollTo().performClick()
+        compose.onNodeWithTag("entry-amount").assertTextContains("8")
+        compose.onNodeWithTag("entry-note").assertTextContains("保留草稿")
+        compose.onNodeWithTag("entry-save").performClick()
+        compose.runOnIdle {
+            assertTrue(liveMetadata.value.accounts.any { it.id == saved?.accountId })
+            assertEquals("77", saved?.accountId)
+            assertEquals(800L, saved?.amountCents)
+        }
+    }
+
+    @Test fun inlineCreationHonorsJournalGateAndRecoversWithoutLosingDraft() {
+        val loading = mutableStateOf(true)
+        val error = mutableStateOf("")
+        val body = JSONObject().put("operationId", "prior").put("entityType", "tag")
+            .put("entityId", JSONObject.NULL).put("action", "save")
+            .put("content", JSONObject().put("name", "旧标签")).toString()
+        val pending = mutableStateOf(listOf(PendingMasterRequest("prior", body, 1)))
+        var calls = 0
+        val callbacks = actions().copy(request = { _, payload ->
+            calls++
+            assertEquals("prior", payload!!.getString("operationId"))
+            pending.value = emptyList()
+            JSONObject()
+        })
+        compose.setContent { MoneyTheme {
+            EntrySheet(metadata, null, save = { _, _, _ -> }, close = {}, actions = callbacks,
+                pendingMasterRequests = pending.value, masterRequestsLoading = loading.value,
+                masterRequestError = error.value)
+        } }
+        compose.onNodeWithTag("key-8").performClick()
+        compose.onNodeWithTag("entry-note").performTextInput("未丢失")
+        compose.onNodeWithText("创建账户").assertIsNotEnabled()
+        compose.runOnIdle { loading.value = false; error.value = "日志读取失败" }
+        compose.onNodeWithText("创建账户").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, calls); error.value = "" }
+        compose.onNodeWithText("创建账户").performClick()
+        compose.onNodeWithTag("master-name").assertDoesNotExist()
+        compose.onNodeWithTag("master-recovery-retry").performScrollTo().performClick()
+        compose.onNodeWithTag("entry-amount").assertTextContains("8")
+        compose.onNodeWithTag("entry-note").assertTextContains("未丢失")
+        compose.onNodeWithText("创建账户").performClick()
+        compose.onNodeWithTag("master-name").assertExists()
+        compose.runOnIdle { assertEquals(1, calls) }
+    }
+
     @Test fun failedSaveRetainsFormAndDoesNotDismiss() {
         var dismissed = false
         val backgroundBill = mutableStateOf(bill())
@@ -60,9 +127,10 @@ class LedgerUiTest {
                     close = { dismissed = true })
             }
         }
-        compose.onNodeWithTag("entry-merchant").performTextReplacement("修改后商户")
+        compose.onNodeWithText("时间 / 商户 / 标签 / 更多").performClick()
+        compose.onNodeWithTag("entry-merchant").performScrollTo().performTextReplacement("修改后商户")
         compose.onNodeWithTag("entry-note").performTextReplacement("失败后不能丢失的备注")
-        compose.onNodeWithTag("entry-save").performScrollTo().performClick()
+        compose.onNodeWithTag("entry-save").performClick()
         compose.onNodeWithText("磁盘空间不足").assertExists()
         compose.onNodeWithTag("entry-merchant").assertTextContains("修改后商户")
         compose.onNodeWithTag("entry-note").assertTextContains("失败后不能丢失的备注")
@@ -77,7 +145,7 @@ class LedgerUiTest {
                 EntrySheet(metadata, bill(), save = { _, _, _ -> calls.incrementAndGet(); result.await() }, close = {})
             }
         }
-        compose.onNodeWithTag("entry-save").performScrollTo().performClick()
+        compose.onNodeWithTag("entry-save").performClick()
         compose.onNodeWithTag("entry-save").assertIsNotEnabled()
         compose.runOnIdle { assertEquals(1, calls.get()); result.complete(Unit) }
     }

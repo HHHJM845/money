@@ -15,7 +15,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 @Composable
-internal fun MasterForm(target: JSONObject, metadata: Metadata, actions: LedgerActions, close: () -> Unit) {
+internal fun MasterForm(target: JSONObject, metadata: Metadata, actions: LedgerActions, close: () -> Unit, onSaved: (JSONObject) -> Unit = {}) {
     val entityType = target.getString("entityType")
     val balanceAction = target.optString("action") == "balance"
     val noun = when (entityType) { "account" -> "账户"; "category" -> "分类"; else -> "标签" }
@@ -43,7 +43,8 @@ internal fun MasterForm(target: JSONObject, metadata: Metadata, actions: LedgerA
     val locked = frozen != null || busy
     suspend fun execute(body: String) {
         try {
-            actions.request("v2/master/submit", JSONObject(body))
+            val result = actions.request("v2/master/submit", JSONObject(body))
+            onSaved(result)
             frozen = null
             close()
         } catch (cancel: CancellationException) { throw cancel }

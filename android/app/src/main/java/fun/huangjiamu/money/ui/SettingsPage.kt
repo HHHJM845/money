@@ -1,6 +1,7 @@
 package `fun`.huangjiamu.money.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -39,8 +40,10 @@ internal fun SettingsPage(state: LedgerState, actions: LedgerActions, capture: C
         }
     }
     LazyColumn(Modifier.fillMaxSize().testTag("settings-list"), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item {
+            Surface(color = MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel("云端同步")
             FieldLine("登录状态", if (state.authExpired) "会话已过期" else if (connected) "已登录" else "尚未登录")
             FieldLine("待云端确认", "${state.queuedCount} 项")
@@ -51,8 +54,9 @@ internal fun SettingsPage(state: LedgerState, actions: LedgerActions, capture: C
                 color = MaterialTheme.colorScheme.error)
             ErrorNotice(state.syncError)
             if (!connected || state.authExpired) Button(onClick = openLogin) { Text("登录云端账本") }
-            else TextButton(onClick = { logoutConfirm = true }) { Text("退出云端登录") }
+            else TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { logoutConfirm = true }) { Text("退出云端登录") }
         }
+        } }
         item {
             if (masterRequestsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
             ErrorNotice(masterRequestError)
@@ -88,7 +92,7 @@ internal fun SettingsPage(state: LedgerState, actions: LedgerActions, capture: C
         }
         state.metadata.accounts.forEach { account ->
             item(key = "account:${account.id}") {
-                Row(Modifier.fillMaxWidth().clickable { accountId = account.id }.padding(vertical = 10.dp),
+                Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).clickable { accountId = account.id }.padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Icon(if (account.category == "3") Icons.Default.CreditCard else Icons.Default.AccountBalanceWallet, null)
                     Column(Modifier.weight(1f)) {
@@ -150,7 +154,7 @@ internal fun SettingsPage(state: LedgerState, actions: LedgerActions, capture: C
         }
         item {
             HorizontalDivider()
-            TextButton(onClick = { trash = !trash }) {
+            TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { trash = !trash }) {
                 Icon(Icons.Default.DeleteOutline, null); Spacer(Modifier.width(8.dp))
                 Text("回收站 · ${state.bills.count { it.status == "deleted" }}")
                 Icon(if (trash) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
@@ -184,8 +188,8 @@ internal fun SettingsPage(state: LedgerState, actions: LedgerActions, capture: C
     }
     if (logoutConfirm) AlertDialog(onDismissRequest = { logoutConfirm = false }, title = { Text("退出云端登录？") },
         text = { Text("本机账单和待上传操作会保留。重新登录后可继续同步。") },
-        confirmButton = { TextButton(onClick = { actions.logout(); logoutConfirm = false }) { Text("退出") } },
-        dismissButton = { TextButton(onClick = { logoutConfirm = false }) { Text("取消") } })
+        confirmButton = { TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { actions.logout(); logoutConfirm = false }) { Text("退出") } },
+        dismissButton = { TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { logoutConfirm = false }) { Text("取消") } })
 }
 
 internal fun AccountView.json(): JSONObject = JSONObject().put("id", id).put("name", name).put("version", version)
@@ -198,13 +202,13 @@ internal fun AccountView.json(): JSONObject = JSONObject().put("id", id).put("na
 private fun SectionHeader(title: String, addLabel: String, add: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-        TextButton(onClick = add) { Icon(Icons.Default.Add, null); Text(addLabel) }
+        TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = add) { Icon(Icons.Default.Add, null); Text(addLabel) }
     }
 }
 
 @Composable
 private fun PermissionRow(title: String, granted: Boolean, connected: Boolean, explanation: String, settings: () -> Unit) {
-    Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, style = MaterialTheme.typography.titleSmall)
         Text(explanation, style = MaterialTheme.typography.bodySmall)
         Text("${if (granted) "系统权限已授权" else "系统权限未授权"} · ${if (connected) "服务已连接" else "服务未连接"}",
@@ -243,7 +247,7 @@ private fun AccountPage(account: AccountView, actions: LedgerActions, close: () 
         OutlinedButton(onClick = edit, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Edit, null); Text("编辑账户") }
         OutlinedButton(onClick = balance, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Tune, null); Text("余额启停与校准") }
         SectionLabel("余额变动历史")
-        if (error.isNotBlank()) { ErrorNotice(error); TextButton(onClick = { attempt++ }) { Text("重试读取") } }
+        if (error.isNotBlank()) { ErrorNotice(error); TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { attempt++ }) { Text("重试读取") } }
         else if (history == null) LinearProgressIndicator(Modifier.fillMaxWidth())
         else if (history!!.isEmpty()) Text("暂无余额变动记录")
         else history!!.reversed().forEach { row ->
@@ -254,7 +258,7 @@ private fun AccountPage(account: AccountView, actions: LedgerActions, close: () 
             }, "${delta?.let { (if (it > 0) "+" else "") + yuan(it) } ?: "基准调整"} · 变动后 ${after?.let { "¥${yuan(it)}" } ?: "未设置"}")
             row.optString("note").takeIf { it.isNotBlank() && it != "null" }?.let { Text(it) }
             row.optString("billId").takeIf { it.isNotBlank() && it != "null" }?.let { id ->
-                TextButton(onClick = { openBill(id) }) { Text("查看关联账单") }
+                TextButton(colors = ButtonDefaults.textButtonColors(contentColor = actionTextColor()), onClick = { openBill(id) }) { Text("查看关联账单") }
             }
             HorizontalDivider()
         }

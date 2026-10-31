@@ -34,8 +34,10 @@ import java.io.File
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class NativeScreenshotTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
-    private val metadata = Metadata(listOf(AccountView("1", "现金", null, "1", "CNY")),
-        listOf(CategoryView("2", "餐饮", 2, null, true)))
+    private val metadata = Metadata(listOf(AccountView("1", "现金", null, "1", "CNY"), AccountView("8", "储蓄卡", null, "2", "CNY")),
+        listOf(CategoryView("2", "餐饮", 2, null, true), CategoryView("3", "交通", 2, null, true),
+            CategoryView("4", "购物", 2, null, true), CategoryView("5", "居家", 2, null, true),
+            CategoryView("6", "午餐", 2, "2", true)))
 
     private fun actions(save: suspend (String?, BillContent, String) -> Unit) = LedgerActions(
         save = save, delete = {}, restore = {}, resolve = { _, _, _ -> },
@@ -60,19 +62,22 @@ class NativeScreenshotTest {
             }
         }
         compose.onNodeWithTag("new-entry").performClick()
-        compose.onNodeWithTag("entry-amount").performTextInput("25.00")
+        listOf("2", "5", ".", "0", "0").forEach { compose.onNodeWithTag("key-" + it).performClick() }
+        captureNativeWindow("synthetic-yimu-entry")
+        compose.onNodeWithText("时间 / 商户 / 标签 / 更多").performClick()
         compose.onNodeWithTag("entry-merchant").performScrollTo().performTextInput("合成商户")
-        compose.onNodeWithTag("entry-account").performScrollTo().performClick()
-        compose.onNodeWithText("现金").performClick()
-        compose.onNodeWithTag("entry-category").performScrollTo().performClick()
+        compose.onNodeWithTag("entry-account").performClick()
+        compose.onAllNodesWithText("现金").onLast().performClick()
         compose.onNodeWithText("餐饮").performClick()
-        compose.onNodeWithTag("entry-save").performScrollTo().performClick()
+        compose.onNodeWithTag("entry-save").performClick()
         compose.onNodeWithText("已保存到本机，等待云端确认").assertIsDisplayed()
         compose.runOnIdle { assertEquals(1, saves); assertEquals("posted", state.value.bills.single().status) }
         compose.onNodeWithTag("nav-1").performClick().assertIsSelected()
         compose.onNodeWithText("退款（到账月）").assertExists()
+        captureNativeWindow("synthetic-statistics-aligned")
         compose.onNodeWithTag("nav-2").performClick().assertIsSelected()
         compose.onNodeWithText("云端同步").assertExists()
+        captureNativeWindow("synthetic-settings-aligned")
         compose.onNodeWithTag("nav-0").performClick().assertIsSelected()
         compose.onNodeWithTag("bill-list").performScrollToNode(hasText("合成商户"))
         compose.onNodeWithText("合成商户").assertIsDisplayed()
@@ -109,10 +114,38 @@ class NativeScreenshotTest {
         captureNativeWindow("synthetic-pending-dark360-font130-not-oneplus")
         compose.onNodeWithText("补充并确认").performClick()
         compose.onNodeWithTag("entry-amount").assertTextContains("999.00")
-        compose.onNodeWithTag("entry-save").performScrollTo().performClick()
+        compose.onNodeWithTag("entry-save").performClick()
         compose.onNodeWithText("入账前请补齐金额和资金账户").assertExists()
         compose.onNodeWithTag("entry-amount").assertTextContains("999.00")
         compose.runOnIdle { assertEquals(0, saves) }
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h640dp")
+    fun compactEntryLargeFontKeepsKeypadAndFieldRoutes() {
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+                MoneyTheme { EntrySheet(metadata, null, save = { _, _, _ -> }, close = {}) }
+            }
+        }
+        compose.onNodeWithText("现金").assertExists()
+        compose.onNodeWithText("餐饮").performClick()
+        compose.onNodeWithText("午餐").performClick()
+        compose.onNodeWithTag("key-2").performClick()
+        compose.onNodeWithTag("key-⌫").assertIsDisplayed()
+        compose.onNodeWithTag("entry-save").assertIsDisplayed()
+        captureNativeWindow("synthetic-entry-360x640-font130")
+        compose.onNodeWithText("时间 / 商户 / 标签 / 更多").performScrollTo().performClick()
+        compose.onNodeWithTag("entry-merchant").performScrollTo().performTextInput("午餐商户")
+        compose.onNodeWithTag("entry-account").performClick()
+        compose.onNodeWithText("不选择").performClick()
+        compose.onNodeWithTag("key-3").performClick()
+        compose.onNodeWithTag("entry-account").assertTextContains("资金账户")
+        compose.onNodeWithTag("entry-account").performClick()
+        compose.onNodeWithText("储蓄卡").performClick()
+        compose.onNodeWithTag("entry-note").performTextInput("保留")
+        compose.onNodeWithTag("entry-save").assertIsDisplayed()
     }
 
     private fun captureNativeWindow(name: String) {

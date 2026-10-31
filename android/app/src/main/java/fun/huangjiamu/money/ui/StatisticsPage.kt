@@ -1,6 +1,7 @@
 package `fun`.huangjiamu.money.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
@@ -16,9 +17,7 @@ internal fun StatisticsPage(state: LedgerState, month: String, openCategory: (St
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             totals.fold(onSuccess = {
-                Text("净支出", style = MaterialTheme.typography.labelLarge)
-                Text("¥${yuan(it.netExpenseCents)}", style = MaterialTheme.typography.headlineLarge)
-                FieldLine("收入", "¥${yuan(it.incomeCents)}")
+                Surface(color = MaterialTheme.colorScheme.surface) { MonthlySummary(it) }
                 FieldLine("原始支出", "¥${yuan(it.expenseCents)}")
                 FieldLine("退款（到账月）", "¥${yuan(it.refundCents)}")
                 FieldLine("月结余", "¥${yuan(it.surplusCents)}")
@@ -36,7 +35,7 @@ internal fun StatisticsPage(state: LedgerState, month: String, openCategory: (St
         if (groups.isEmpty()) item { Text("本月暂无消费", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         groups.forEach { (id, amount) ->
             item {
-                Column(Modifier.fillMaxWidth().clickable { openCategory(id) }.padding(vertical = 8.dp)) {
+                Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).clickable { openCategory(id) }.padding(12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(categoryLabel(state.metadata, id), Modifier.weight(1f))
                         Text(amount.getOrNull()?.let { "¥${yuan(it)}" } ?: "金额超出范围")
@@ -53,7 +52,7 @@ internal fun StatisticsPage(state: LedgerState, month: String, openCategory: (St
             it.content.kind != "transfer" && dateLabel(it.content.occurredAt, "yyyy-MM") == month }
             .groupBy { dateLabel(it.content.occurredAt, "yyyy-MM-dd") }.toSortedMap(reverseOrder()).forEach { (day, bills) ->
                 item {
-                    Column(Modifier.fillMaxWidth().clickable { openDay(day) }.padding(vertical = 8.dp)) {
+                    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).clickable { openDay(day) }.padding(12.dp)) {
                         Text(day, style = MaterialTheme.typography.labelLarge)
                         runCatching { summarizeBills(bills, month) }.fold(onSuccess = {
                             Text("净支出 ¥${yuan(it.netExpenseCents)} · 收入 ¥${yuan(it.incomeCents)}",

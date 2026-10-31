@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
-  ArrowDownLeft, ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpRight, BookOpen,
+  ArrowLeft, ArrowRight, BookOpen,
   ChartNoAxesCombined, Check, ChevronLeft, ChevronRight, CircleAlert, Download,
-  LogOut, Plus, RefreshCw, Search, Settings, ShieldCheck, Undo2, Upload,
+  LogOut, Plus, RefreshCw, Search, Settings, ShieldCheck, Upload,
 } from 'lucide-react';
 import { ApiError, login, request } from './api';
 import ImportDialog from './ImportDialog';
-import BillDetail from './BillDetail';
+import BillDetail, { CategoryIcon } from './BillDetail';
 import PendingList from './PendingList';
 import MutationRecovery from './MutationRecovery';
 import SettingsPage, { AccountDialog } from './SettingsPage';
@@ -54,9 +54,9 @@ function Summary({ data, month }: { data: LedgerSnapshot; month: string }) {
     const flow = billSummary(data.bills, month);
     return <section className="cashflow-summary" aria-label="本月收支">
       <div className="summary-primary"><div><span>净支出</span><strong className="amount">¥{money(flow.netExpenseCents)}</strong></div>
+        <div><span>收入</span><strong className="income amount">¥{money(flow.incomeCents)}</strong></div>
         <div><span>结余</span><strong className="amount">¥{money(flow.surplusCents)}</strong></div></div>
       <details className="summary-breakdown"><summary>收入、支出与退款</summary><dl>
-        <div><dt>收入</dt><dd className="income amount">¥{money(flow.incomeCents)}</dd></div>
         <div><dt>原始支出</dt><dd className="amount">¥{money(flow.expenseCents)}</dd></div>
         <div><dt>退款</dt><dd className="refund amount">¥{money(flow.refundCents)}</dd></div>
       </dl></details>
@@ -286,7 +286,7 @@ export default function App() {
     </header><main className="workspace">
       <header className="page-heading"><div><span className="eyebrow">我的日常账本</span><h1>{view === 'bills' ? pendingView ? '待确认' : '账单' : view === 'statistics' ? '收支统计' : '我的'}</h1></div>
         <div className="heading-actions"><button className="secondary" disabled={!data} onClick={() => setModal({ kind: 'import' })}><Upload size={16} /><span>导入账单</span></button>
-          <button className="primary" disabled={!data} onClick={() => openBill(null)}><Plus size={17} />记一笔</button></div>
+          <button className="primary entry-fab" disabled={!data} onClick={() => openBill(null)}><Plus size={17} />记一笔</button></div>
       </header>
       {logoutError && <div className="error-banner" role="alert"><CircleAlert size={18} /><span>{logoutError}</span><button onClick={() => void logout()}>重试退出</button></div>}
       {error && <div className="error-banner" role="alert"><CircleAlert size={18} /><span>{error}{data ? '。正在显示上次读取的数据。' : ''}</span><button onClick={() => void refresh()}>重试</button></div>}
@@ -313,11 +313,11 @@ export default function App() {
               <header className="ledger-day-heading"><h2><time dateTime={date}>{date.slice(5).replace('-', '月')}日</time></h2></header>
               {entries.map(b => {
                 const c = b.content;
-                const Icon = c.kind === 'income' ? ArrowDownLeft : c.kind === 'refund' ? Undo2 : c.kind === 'transfer' ? ArrowLeftRight : ArrowUpRight;
+
                 return <button className="transaction-row" key={b.billId} onClick={() => openBill(b)}>
-                  <span className={`transaction-icon ${c.kind}`}><Icon size={18} /></span>
-                  <span className="transaction-description"><strong>{c.merchant || c.note || categoryLabel(data.categories, c.categoryId)}</strong><small>
-                    <span className={`kind-label ${c.kind}`}>{kindNames[c.kind]}</span> · {accountName(c.accountId)}{c.kind === 'transfer' ? ` → ${accountName(c.destinationAccountId)}` : ` · ${categoryLabel(data.categories, c.categoryId)}`}{c.excludeFromStatistics ? ' · 不计统计' : ''}
+                  <span className={`transaction-icon ${c.kind}`}><CategoryIcon name={categoryLabel(data.categories, c.categoryId)} /></span>
+                  <span className="transaction-description"><strong>{categoryLabel(data.categories, c.categoryId)}</strong>{(c.merchant || c.note) && <small className="merchant-summary">{c.merchant || c.note}</small>}<small>
+                    <span className={`kind-label ${c.kind}`}>{kindNames[c.kind]}</span> · {accountName(c.accountId)}{c.kind === 'transfer' ? ` → ${accountName(c.destinationAccountId)}` : ''}{c.excludeFromStatistics ? ' · 不计统计' : ''}
                   </small></span>
                   <span className={`row-amount amount ${c.kind}`}>{c.kind === 'income' || c.kind === 'refund' ? '+' : c.kind === 'expense' ? '−' : ''}¥{money(c.amountCents ?? 0)}</span><ChevronRight size={15} />
                 </button>;

@@ -1,22 +1,35 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Check, ChevronRight, Pencil, RotateCcw, Trash2, Undo2, X } from 'lucide-react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Check, ChevronRight, Pencil, RotateCcw, Trash2, Undo2, X, Utensils, ShoppingBag, Car, Home, HeartPulse, GraduationCap, Gift, Wallet, Briefcase, Smartphone, PawPrint, Shirt, CircleHelp } from 'lucide-react';
 import { money } from './finance';
+import { amountKey } from './amount-keypad';
+import { AccountDialog } from './SettingsPage';
 import MutationLogin from './MutationLogin';
 import {
   categoryLabel, errorText, kindNames, loadBillDetail, localDateTime, parseLedgerAmount, pendingReasons,
   timestampLabel, useFrozenMutation,
-  type Bill, type BillContent, type BillDetailResult, type BillSubmission, type LedgerSnapshot,
+  type LedgerAccount, type Bill, type BillContent, type BillDetailResult, type BillSubmission, type LedgerSnapshot,
 } from './bookkeeping-api';
+
+export function CategoryIcon({ name }: { name: string }) {
+  const Icon = /餐|食|饮|饭/.test(name) ? Utensils : /购物|消费|超市/.test(name) ? ShoppingBag
+    : /交通|出行|车/.test(name) ? Car : /居|房|物业/.test(name) ? Home
+    : /医|健康/.test(name) ? HeartPulse : /学|教育|书/.test(name) ? GraduationCap
+    : /礼|人情/.test(name) ? Gift : /工资|工作|办公/.test(name) ? Briefcase
+    : /手机|数码|通讯/.test(name) ? Smartphone : /宠物/.test(name) ? PawPrint
+    : /衣|服|装/.test(name) ? Shirt : /收入|薪|转账|还款|理财/.test(name) ? Wallet : CircleHelp;
+  return <Icon size={22} strokeWidth={1.5} aria-hidden="true" />;
+}
 
 export function LedgerDialog({ title, close, locked = false, children }: {
   title: string; close: () => void; locked?: boolean; children: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   useEffect(() => { dialog.current?.showModal(); }, []);
-  return <dialog ref={dialog} aria-labelledby="ledger-dialog-title"
-    onCancel={e => { e.preventDefault(); if (!locked) close(); }}
+  return <dialog ref={dialog} aria-labelledby={titleId}
+    onCancel={e => { e.preventDefault(); e.stopPropagation(); if (!locked) close(); }}
     onClick={e => { if (e.target === dialog.current && !locked) close(); }}>
-    <header className="dialog-header"><h2 id="ledger-dialog-title">{title}</h2>
+    <header className="dialog-header"><h2 id={titleId}>{title}</h2>
       <button type="button" className="icon-button" title="关闭" aria-label="关闭" disabled={locked} onClick={close}><X size={20} /></button>
     </header>{children}
   </dialog>;
@@ -29,6 +42,7 @@ export default function BillDetail({ bill, refundOf, data, close, saved, openBil
   const [base, setBase] = useState(bill);
   const [editing, setEditing] = useState(!bill || bill.status === 'pending');
   const [kind, setKind] = useState<BillContent['kind']>(bill?.content.kind ?? (refundOf ? 'refund' : 'expense'));
+  const [categoryOverride, setCategoryOverride] = useState<string | null>(null);
   const [details, setDetails] = useState<BillDetailResult | null>(null);
   const [detailError, setDetailError] = useState('');
   const [loading, setLoading] = useState(Boolean(bill));
@@ -40,8 +54,13 @@ export default function BillDetail({ bill, refundOf, data, close, saved, openBil
   const mutation = useFrozenMutation<Bill>('v2/bills/submit');
   const newId = useRef(crypto.randomUUID());
   const initial = bill?.content;
-  const accounts = data.accounts.filter(a => a.type === 1 && a.currency === 'CNY' && a.active);
-  const accountOptions = (id: string | null | undefined) => data.accounts.filter(a => accounts.some(active => active.id === a.id) || a.id === id);
+  const [amount, setAmount] = useState(initial?.amountCents == null ? '' : money(initial.amountCents).replaceAll(',', ''));
+  const [creatingAccount, setCreatingAccount] = useState(false);
+  const [createdAccounts, setCreatedAccounts] = useState<LedgerAccount[]>([]);
+  const allAccounts = [...data.accounts, ...createdAccounts.filter(a => !data.accounts.some(b => b.id === a.id))];
+  const [accountId, setAccountId] = useState(initial ? initial.accountId ?? '' : refundOf?.content.accountId ?? data.accounts.find(a => a.type === 1 && a.currency === 'CNY' && a.active)?.id ?? '');
+  const accounts = allAccounts.filter(a => a.type === 1 && a.currency === 'CNY' && a.active);
+  const accountOptions = (id: string | null | undefined) => allAccounts.filter(a => accounts.some(active => active.id === a.id) || a.id === id);
   const original = data.bills.find(b => b.billId === refundId) ?? (refundId === refundOf?.billId ? refundOf : undefined);
   const eligibleCategories = data.categories.filter(c => c.active && c.type === (kind === 'income' ? 1 : kind === 'transfer' ? 3 : 2))
     .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -49,7 +68,7 @@ export default function BillDetail({ bill, refundOf, data, close, saved, openBil
   const remaining = original ? (original.content.amountCents ?? 0) - refunds.reduce((total, b) => total + (b.content.amountCents ?? 0), 0) : 0;
   const related = bill ? data.bills.filter(b => b.status !== 'deleted' && (b.content.refundOfBillId === bill.billId || b.billId === bill.content.refundOfBillId)) : [];
   const accountLabel = (id: string | null | undefined) => {
-    const item = data.accounts.find(a => a.id === id);
+    const item = allAccounts.find(a => a.id === id);
     return item ? `${item.name}${item.active ? '' : '（已停用）'}` : '待确认';
   };
   async function readDetails() {
@@ -116,35 +135,52 @@ export default function BillDetail({ bill, refundOf, data, close, saved, openBil
   }
   const content = base?.content;
   const title = bill?.status === 'deleted' ? '已删除账单' : editing ? bill?.status === 'pending' ? '确认账单' : bill ? '修改账单' : refundOf ? '登记退款' : '记一笔' : '账单详情';
-  return <LedgerDialog title={title} close={close} locked={mutation.locked}>
+  return <><LedgerDialog title={title} close={close} locked={mutation.locked}>
     <div className="dialog-content">
       {bill?.status === 'pending' && <div className="pending-note"><strong>待确认</strong><p>{pendingReasons(bill).join(' · ')}</p><small>尚未计入统计或账面余额</small></div>}
       {editing ? <form className="entry-form" onSubmit={submit}>
         <fieldset disabled={mutation.locked}>
           {!refundOf && initial?.kind !== 'refund' ? <div className="segmented" role="group" aria-label="账单类型">
-            {(['expense', 'income', 'transfer'] as const).map(k => <button key={k} type="button" className={kind === k ? 'selected' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}>{kindNames[k]}</button>)}
+            {(['expense', 'income', 'transfer'] as const).map(k => <button key={k} type="button" className={kind === k ? 'selected' : ''} aria-pressed={kind === k} onClick={() => { if (k !== kind) { setKind(k); setCategoryOverride(null); } }}>{kindNames[k]}</button>)}
           </div> : <p className="refund">退款 · {original?.content.merchant || '关联原支出'}</p>}
-          <label>金额（元）<input name="amount" inputMode="decimal" autoFocus defaultValue={initial?.amountCents == null ? '' : money(initial.amountCents).replaceAll(',', '')} placeholder="0.00" /></label>
+
+          {kind !== 'refund' && <fieldset className="category-picker" key={kind}><legend>分类</legend>
+            <div className="entry-categories">
+              {[...eligibleCategories, ...(initial?.kind === kind && initial.categoryId && !eligibleCategories.some(c => c.id === initial.categoryId) ? [{ id: initial.categoryId, name: categoryLabel(data.categories, initial.categoryId) }] : [])].map(c =>
+                <label className="category-choice" key={c.id}><input type="radio" name="category" value={c.id}
+                  checked={c.id === (categoryOverride ?? (initial?.kind === kind ? initial.categoryId ?? '' : eligibleCategories[0]?.id ?? ''))} onChange={() => setCategoryOverride(c.id)} />
+                  <span className="category-glyph" aria-hidden="true"><CategoryIcon name={c.name} /></span><span>{c.name}</span></label>)}
+            </div>
+          </fieldset>}
+          <div className="entry-input-dock">
+          <div className="entry-dock-fields">
+            <div className="entry-note-amount">
+              <label><span className="entry-field-caption">备注</span><textarea aria-label="备注" name="comment" rows={1} maxLength={2000} defaultValue={initial?.note ?? ''} placeholder="写点备注…" /></label>
+              <label><span className="entry-field-caption">金额（元）</span><input name="amount" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.00" /></label>
+            </div>
+
           {kind === 'refund' && <label>关联原支出<select aria-label="关联原支出" value={refundId} onChange={e => setRefundId(e.target.value)}><option value="">请选择原支出</option>
             {data.bills.filter(b => b.status === 'posted' && b.content.kind === 'expense').map(b => <option value={b.billId} key={b.billId}>{localDateTime(b.content.occurredAt).replace('T', ' ')} · {b.content.merchant || b.content.note || '支出'} · ¥{money(b.content.amountCents ?? 0)}</option>)}
           </select></label>}
           {kind === 'refund' && <p className="fine">原支出 ¥{money(original?.content.amountCents ?? 0)}，剩余可退 ¥{money(remaining)}。退款计入实际到账月份。</p>}
-          <div className="form-grid">
-            <label>{kind === 'transfer' ? '转出账户' : kind === 'refund' ? '退款到账账户' : '账户'}<select aria-label={kind === 'transfer' ? '转出账户' : kind === 'refund' ? '退款到账账户' : '账户'} name="account" defaultValue={initial ? initial.accountId ?? '' : refundOf?.content.accountId ?? accounts[0]?.id ?? ''}>
-              <option value="">待确认账户</option>{accountOptions(initial?.accountId).map(a => <option value={a.id} key={a.id}>{accountLabel(a.id)}</option>)}
+          <div className="form-grid entry-toolbar">
+            <button type="button" className="create-account-shortcut" aria-label="创建账户" title="创建账户" onClick={() => setCreatingAccount(true)}>＋</button>
+          <label><span className="entry-field-caption">时间（北京时间）</span><input type="datetime-local" name="date" defaultValue={localDateTime(initial?.occurredAt ?? Date.now())} required /></label>
+            <label><span className="entry-field-caption">{kind === 'transfer' ? '转出账户' : kind === 'refund' ? '退款到账账户' : '账户'}</span><select aria-label={kind === 'transfer' ? '转出账户' : kind === 'refund' ? '退款到账账户' : '账户'} name="account" value={accountId} onChange={e => setAccountId(e.target.value)}>
+              <option value="">暂不选择</option>{accountOptions(initial?.accountId).map(a => <option value={a.id} key={a.id}>{accountLabel(a.id)}</option>)}
             </select></label>
             {kind === 'transfer' ? <label>转入账户<select aria-label="转入账户" name="destination" defaultValue={initial?.destinationAccountId ?? accounts[1]?.id ?? ''}>
-              <option value="">待确认账户</option>{accountOptions(initial?.destinationAccountId).map(a => <option value={a.id} key={a.id}>{accountLabel(a.id)}</option>)}
+              <option value="">暂不选择</option>{accountOptions(initial?.destinationAccountId).map(a => <option value={a.id} key={a.id}>{accountLabel(a.id)}</option>)}
             </select></label> : kind === 'refund' ? <div className="field-static"><span>分类</span><strong>{categoryLabel(data.categories, original?.content.categoryId ?? null)}</strong></div> : null}
           </div>
-          {kind !== 'refund' && <label>分类<select aria-label="分类" name="category" key={kind} defaultValue={initial?.kind === kind ? initial.categoryId ?? '' : eligibleCategories[0]?.id ?? ''}>
-            {initial?.kind === kind && initial.categoryId && !eligibleCategories.some(c => c.id === initial.categoryId) && <option value={initial.categoryId}>{categoryLabel(data.categories, initial.categoryId)}</option>}
-            <option value="">待确认分类</option>{eligibleCategories.map(c => <option key={c.id} value={c.id}>{categoryLabel(data.categories, c.id)}</option>)}
-          </select></label>}
+
           {kind === 'transfer' && <p className="fine">转账与信用卡还款不计入普通收入和支出。</p>}
-          <label>时间（北京时间）<input type="datetime-local" name="date" defaultValue={localDateTime(initial?.occurredAt ?? Date.now())} required /></label>
+
+          {!accounts.length && <p className="fine" role="status">暂无人民币账户。创建账户后可入账，余额可留空；也可先存为待确认。</p>}
+          <details className="entry-optional"><summary>更多详情（商户、标签、统计与预算）</summary>
+          {kind !== 'refund' && <button type="button" className="text-button" onClick={() => setCategoryOverride('')}>清除分类</button>}
           <label>商户 / 摘要<input name="merchant" maxLength={200} defaultValue={initial?.merchant ?? refundOf?.content.merchant ?? ''} /></label>
-          <label>备注<textarea aria-label="备注" name="comment" rows={2} maxLength={2000} defaultValue={initial?.note ?? ''} /></label>
+
           {data.tags.some(t => t.active || initial?.tagIds.includes(t.id)) && <fieldset className="tag-options"><legend>标签</legend>{data.tags.filter(t => t.active || initial?.tagIds.includes(t.id)).map(t => <label className="check-label" key={t.id}>
             <input type="checkbox" checked={tagIds.includes(t.id)} onChange={e => setTagIds(ids => e.target.checked ? [...ids, t.id] : ids.filter(id => id !== t.id))} />{t.name}{t.active ? '' : '（已停用）'}
           </label>)}</fieldset>}
@@ -152,9 +188,15 @@ export default function BillDetail({ bill, refundOf, data, close, saved, openBil
             <label className="check-label"><input name="excludeStatistics" type="checkbox" defaultChecked={initial?.excludeFromStatistics} />不计入统计</label>
             <label className="check-label"><input name="excludeBudget" type="checkbox" defaultChecked={initial?.excludeFromBudget} />不计入预算</label>
           </details>
+          </details>
+          </div>
+          <div className="amount-keypad" role="group" aria-label="金额键盘">
+            {['1','2','3','4','5','6','7','8','9','.','0','delete'].map(key => <button type="button" key={key} aria-label={key === 'delete' ? '删除一位' : key === '.' ? '小数点' : key} onClick={() => setAmount(value => amountKey(value, key))}>{key === 'delete' ? '⌫' : key}</button>)}
+          </div>
+          </div>
         </fieldset>
         {formError && <p className="error" role="alert">{formError}</p>}
-        {!accounts.length && <p className="fine">暂无人民币账户。可以先存为待确认，再到「我的」创建账户。</p>}
+
         <div className="dialog-actions">
           {bill?.status === 'pending' && <button type="button" className="danger text-button" disabled={mutation.locked} onClick={() => setDeleteConfirm(true)}><Trash2 size={16} />删除待确认</button>}
           <button className="primary" name="intent" value="posted" disabled={mutation.locked || Boolean(candidate)}><Check size={16} />{mutation.busy ? '保存中…' : bill?.status === 'pending' ? '确认入账' : '保存到账本'}</button>
@@ -211,5 +253,12 @@ export default function BillDetail({ bill, refundOf, data, close, saved, openBil
         </dl>
       </details>}
     </div>
-  </LedgerDialog>;
+  </LedgerDialog>{creatingAccount && <AccountDialog close={() => setCreatingAccount(false)} saved={result => {
+    const account = result.snapshot;
+    if (result.entityType === 'account' && 'balance' in account) {
+      setCreatedAccounts(rows => [...rows, account]);
+      setAccountId(result.entityId);
+    }
+    setCreatingAccount(false);
+  }} />}</>;
 }

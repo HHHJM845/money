@@ -363,3 +363,113 @@ dialog.import-dialog { width: 740px; }
   .detail-list { grid-template-columns: 72px minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .spinning { animation: none; } }
+
+/* Yimu reference: quiet gray canvas, white grouped rows, mint selection. */
+:root {
+  --bg: #f6f6f6;
+  --subtle: #f6f6f6;
+  --green: #48ab93;
+  --green-hover: #307c69;
+  --green-soft: #eaf5f1;
+  --income: #48ab93;
+  --expense: #fb5655;
+  --muted: #666666;
+  --on-accent: #102e26;
+}
+:root[data-theme='dark'] {
+  --bg: #181b19;
+  --subtle: #252a27;
+  --green: #65c5ac;
+  --green-soft: #253e35;
+  --muted: #a4afa7;
+  --expense: #ff8584;
+}
+.settings-section, .statistics-section, .ledger-day {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+  border-bottom: 0;
+}
+.settings-section:first-child { padding-top: 20px; }
+.setting-row { min-height: 60px; }
+.ledger-day { padding: 0 16px; }
+.ledger-day-heading { margin-inline: -16px; padding-inline: 16px; border: 0; }
+.transaction-icon, .account-symbol { border-radius: 50%; }
+.row-amount.expense, .detail-amount.expense { color: var(--expense); }
+.entry-form > fieldset > .segmented { width: 100%; justify-content: center; background: transparent; border-bottom: 1px solid var(--line); border-radius: 0; }
+.entry-form > fieldset > .segmented button { border-radius: 0; min-height: 44px; background: transparent; box-shadow: none; border-bottom: 3px solid transparent; }
+.entry-form > fieldset > .segmented button.selected { border-bottom-color: var(--green); }
+.category-picker > legend { font-size: 12px; color: var(--muted); }
+.entry-categories { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px 8px; padding: 16px 0 24px; align-content: start; min-height: 0; }
+.category-choice { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; margin: 0; padding: 8px 2px; cursor: pointer; overflow-wrap: anywhere; font-size: 12px; }
+.category-choice input { position: absolute; opacity: 0; width: 100%; height: 100%; inset: 0; margin: 0; cursor: pointer; }
+.category-glyph { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--subtle); font-size: 18px; }
+.category-choice:has(input:checked) .category-glyph { background: var(--green); color: var(--on-accent); }
+.category-choice:has(input:checked) { font-weight: 600; }
+.category-choice:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 6px; }
+.entry-input-dock { background: var(--surface); border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; flex: 0 0 auto; }
+.entry-note-amount { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: center; }
+.entry-note-amount input { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding-inline: 0; }
+.entry-note-amount input[name='amount'] { text-align: right; color: var(--expense); font-size: 26px; padding-block: 4px; height: 40px; }
+.entry-optional { margin-block: 3px; }
+.entry-optional summary { padding: 4px 0; font-size: 13px; color: var(--muted); min-height: 30px; }
+.amount-keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex: 0 0 auto; }
+.amount-keypad button { background: var(--subtle); min-height: 52px; font-size: 23px; font-variant-numeric: tabular-nums; }
+.amount-keypad button:hover { background: var(--green-soft); }
+.amount-keypad button:active { background: var(--green); color: var(--on-accent); }
+.entry-form .dialog-actions { position: sticky; bottom: -22px; padding-block: 12px; background: var(--surface); border-top: 1px solid var(--line); z-index: 1; }
+/* Entry layout: categories scroll; primary fields, keypad and actions do not shrink. The dialog content scrolls when enlarged text exceeds the viewport. The outer fieldset uses display: contents to avoid its intrinsic flex sizing while preserving disabled controls. */
+dialog:has(.entry-input-dock) {
+  width: 620px;
+  height: min(850px, 96dvh);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+dialog:has(.entry-input-dock) .dialog-header { flex-shrink: 0; padding-block: 8px; }
+dialog:has(.entry-input-dock) > .dialog-content { min-height: 0; overflow: auto; flex: 1; display: flex; flex-direction: column; }
+dialog:has(.entry-input-dock) .entry-form { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+.entry-form:has(.entry-input-dock) > fieldset { display: contents; }
+.entry-form:has(.entry-input-dock) > fieldset > .segmented { flex-shrink: 0; margin-bottom: 4px; }
+.entry-note-amount label { font-size: 11px; margin: 0; gap: 0; }
+.entry-note-amount textarea { padding: 4px 0; border: 0; border-bottom: 1px solid var(--line); max-height: 70px; height: 40px; min-height: 40px; resize: none; }
+.entry-toolbar { align-items: center; display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 32px; gap: 4px; margin-top: 4px; }
+.entry-toolbar label { font-size: 10px; margin: 0; gap: 0; }
+.entry-toolbar input, .entry-toolbar select { font-size: 12px; min-height: 36px; padding: 4px 2px; background: var(--subtle); border: 0; }
+.entry-toolbar label:has(input[type='datetime-local']) { grid-column: 1; grid-row: 1; }
+.entry-optional[open] { overflow: auto; max-height: 120px; }
+.entry-form:has(.entry-input-dock) .dialog-actions { position: static; margin-top: 6px; padding-block: 8px; flex: 0 0 auto; }
+.entry-form:has(.entry-input-dock) { overflow: visible; }
+.entry-form:has(.entry-input-dock) .category-picker { flex: 1 1 140px; min-height: 112px; overflow: auto; }
+.entry-dock-fields { flex: 0 0 auto; }
+.entry-input-dock .fine { margin-block: 4px; line-height: 1.4; font-size: 12px; }
+.cashflow-summary { background: var(--surface); border: 0; border-radius: 8px; padding: 16px; }
+.summary-primary { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-block: 8px 14px; max-width: none; }
+.summary-primary strong { font-size: clamp(16px, 2.4vw, 28px); overflow-wrap: anywhere; }
+.summary-primary > div:first-child strong { color: var(--expense); }
+.summary-breakdown { border-top: 1px solid var(--line); padding-top: 10px; }
+.transaction-icon { display: grid; flex-shrink: 0; }
+.transaction-row { padding-block: 12px; }
+.transaction-description { gap: 2px; }
+.entry-field-caption { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.entry-toolbar label:has(select[name='account']) { grid-column: 2; grid-row: 1; }
+.create-account-shortcut { grid-column: 3; grid-row: 1; min-height: 36px; font-size: 22px; color: var(--green); border-radius: 4px; background: var(--green-soft); }
+.entry-form:has(.entry-input-dock) > fieldset > .segmented button { min-height: 36px; }
+@media (max-width: 720px) {
+  .settings-section, .statistics-section { padding: 16px; }
+  .settings-section:first-child { padding-top: 16px; }
+  dialog:has(.entry-input-dock) { max-width: 100vw; width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; }
+  .entry-categories { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding-block: 4px; }
+  .entry-form .dialog-actions { bottom: -18px; padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  .entry-note-amount { gap: 12px; }
+  dialog:has(.entry-input-dock) > .dialog-content { padding: 6px 14px; }
+  dialog:has(.entry-input-dock) .dialog-header { padding-block: 4px; }
+  .entry-input-dock { padding-top: 8px; }
+  .amount-keypad button { min-height: 44px; }
+  .entry-form:has(.entry-input-dock) .dialog-actions { padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .entry-fab { position: fixed; right: 18px; bottom: 84px; z-index: 21; min-height: 48px; border-radius: 24px; padding-inline: 18px; box-shadow: 0 4px 14px var(--shadow); }
+  .cashflow-summary { padding: 12px; }
+  .summary-primary { gap: 8px; }
+  .summary-primary > div > span { font-size: 12px; }
+}
