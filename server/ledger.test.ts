@@ -91,7 +91,9 @@ for (const script of ['init.sql', 'increment.sql']) {
     try {
       await db.exec(await readFile(new URL(`../doc/sql/${script}`, import.meta.url), 'utf8'));
       const tables = ['money_accounts', 'money_balance_history', 'money_bill_sources', 'money_bills',
-        'money_categories', 'money_changes', 'money_ledger_state', 'money_login_limits', 'money_requests', 'money_tags', 'money_transactions'];
+        'money_balance_history_legacy_20261030', 'money_categories', 'money_changes', 'money_ledger_state',
+        'money_login_limits', 'money_requests', 'money_tags', 'money_transactions', 'money_transaction_tags',
+        'money_transaction_sources', 'money_operations', 'money_change_log', 'money_deletion_markers'].sort();
       const metadata = await db.query<{relname: string; relrowsecurity: boolean; relforcerowsecurity: boolean}>(`
         SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class
         WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname LIKE 'money_%' ORDER BY relname`);
